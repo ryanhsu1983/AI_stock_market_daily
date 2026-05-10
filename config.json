@@ -1,7 +1,7 @@
 {
   "watchlist": [
     {"ticker": "0050.TW",   "name": "元大台灣50"},
-    {"ticker": "006208.TW", "name": "富邦台灣50"}
+    {"ticker": "2330", "name": "台積電"}
   ],
 
   "lookback_days": 600,
