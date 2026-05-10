@@ -253,8 +253,10 @@ def evaluate(df: pd.DataFrame, scfg: dict) -> dict:
                    "bear":"#e74c3c","neutral":"#95a5a6"}[trend]
     items.append(("趨勢環境", trend_label, trend_color,
                   f"MA{s}={ma_s:.1f}｜MA{m}={ma_m:.1f}｜MA{l}={ma_l:.1f}｜"
-                  f"收盤{'站上' if above_ma_s else '跌破'}{s}日線，{s}日線{'↑' if ma_s_dir else '↓'}｜"
-                  f"多頭健康=MA{m}>MA{l}且站上{s}日線，多頭轉弱=均線排列但跌破短線支撐，空頭=MA{m}<MA{l}"))
+                  f"收盤{'站上' if above_ma_s else '跌破'}{s}日線（{s}日線{'向上' if ma_s_dir else '向下'}）｜"
+                  f"多頭健康：MA{m}>MA{l} 且收盤站上{s}日線｜"
+                  f"多頭轉弱：MA{m}>MA{l} 但跌破{s}日線或{s}日線轉向｜"
+                  f"空頭確認：MA{m}<MA{l}"))
     # ── 第二層：時機指標 ──────────────────────────────────────
 
     # MACD
@@ -367,7 +369,8 @@ def evaluate(df: pd.DataFrame, scfg: dict) -> dict:
     open_p   = float(latest["Open"])
     chg_pct  = (close - open_p) / open_p * 100
     price_note = (f"開盤={open_p:.2f}｜收盤={close:.2f}｜當日漲跌={chg_pct:+.2f}%｜"
-                  f"紅K=收盤>開盤（買方強勢），黑K=收盤<開盤（賣方強勢）")
+                  f"紅K：收盤>開盤，買方強勢｜黑K：收盤<開盤，賣方強勢｜"
+                  f"長上影線：上漲被壓回，賣壓重｜長下影線：下跌被撐回，買盤強")
     items.append(("價格行為",
                   f"紅K（+{chg_pct:.2f}%）" if is_red else f"黑K（{chg_pct:.2f}%）",
                   "#2ecc71" if is_red else "#e74c3c",
@@ -437,41 +440,61 @@ def evaluate(df: pd.DataFrame, scfg: dict) -> dict:
 # ── 產生單檔 HTML 區塊 ───────────────────────────────────────
 def stock_html_block(name: str, ticker: str, result: dict, note: str = "") -> str:
     rows = ""
-    for label, value, color, n in result["items"]:
-        rows += (f'<tr>'
-                 f'<td style="padding:6px 10px;color:#555;width:110px;font-size:13px;">{label}</td>'
-                 f'<td style="padding:6px 10px;font-weight:bold;color:{color};font-size:13px;">{value}</td>'
-                 f'<td style="padding:6px 10px;color:#777;font-size:11px;">{n}</td>'
-                 f'</tr>')
+    for idx, (label, value, color, n) in enumerate(result["items"]):
+        # 把備註用｜切開，每段變成一個編號子項目
+        parts = [p.strip() for p in n.split("｜") if p.strip()]
+        note_items = "".join(
+            f'<span style="display:block;margin:1px 0;">'
+            f'<span style="color:#aaa;margin-right:4px;">{i+1}.</span>{p}</span>'
+            for i, p in enumerate(parts)
+        )
+        bg_row = "#fafafa" if idx % 2 == 0 else "#ffffff"
+        rows += (
+            f'<tr style="background:{bg_row};border-bottom:1px solid #eee;">'
+            f'<td style="padding:8px 10px;color:#555;width:120px;font-size:13px;'
+            f'font-weight:bold;vertical-align:top;white-space:nowrap;">{label}</td>'
+            f'<td style="padding:8px 10px;font-weight:bold;color:{color};'
+            f'font-size:13px;vertical-align:top;white-space:nowrap;width:160px;">{value}</td>'
+            f'<td style="padding:8px 10px;color:#666;font-size:12px;'
+            f'line-height:1.6;vertical-align:top;">{note_items}</td>'
+            f'</tr>'
+        )
 
     note_html = ""
     if note:
-        note_html = (f'<div style="background:#fef9e7;padding:6px 16px;'
-                     f'font-size:11px;color:#7d6608;border-bottom:1px solid #eee;">'
+        note_html = (f'<div style="background:#fef9e7;padding:8px 16px;'
+                     f'font-size:12px;color:#7d6608;border-bottom:1px solid #eee;">'
                      f'💡 {note}</div>')
 
     pyramid_html = ""
     if result["pyramid"]["suggestions"]:
         sugg = "".join(f'<li style="margin:4px 0;font-size:13px;">{s}</li>'
                        for s in result["pyramid"]["suggestions"])
-        pyramid_html = (f'<div style="background:#f0f8ff;padding:10px 16px;border-top:1px solid #d6eaf8;">'
-                        f'<div style="font-weight:bold;color:#2471a3;margin-bottom:4px;">🏗️ 金字塔建倉建議</div>'
+        pyramid_html = (f'<div style="background:#f0f8ff;padding:12px 16px;border-top:1px solid #d6eaf8;">'
+                        f'<div style="font-weight:bold;color:#2471a3;margin-bottom:6px;">🏗️ 金字塔建倉建議</div>'
                         f'<ul style="margin:0;padding-left:18px;">{sugg}</ul></div>')
 
-    return (f'<div style="margin-bottom:28px;border:2px solid {result["border"]};'
-            f'border-radius:10px;overflow:hidden;background:#fff;">'
-            f'<div style="background:{result["border"]};padding:12px 16px;'
-            f'display:flex;justify-content:space-between;align-items:center;">'
-            f'<span style="color:#fff;font-size:16px;font-weight:bold;">'
-            f'{result["emoji"]} {name} ({ticker.replace(".TW","").replace(".tw","")})</span>'
-            f'<span style="color:#fff;font-size:20px;font-weight:bold;">{result["close"]:.2f}</span>'
-            f'</div>'
-            f'{note_html}'
-            f'<div style="background:{result["bg"]};padding:10px 16px;border-bottom:1px solid #eee;">'
-            f'<strong>{result["summary"]}</strong>'
-            f'<span style="color:#555;margin-left:8px;">— {result["advice"]}</span></div>'
-            f'<table style="width:100%;border-collapse:collapse;">{rows}</table>'
-            f'{pyramid_html}</div>')
+    return (
+        f'<div style="margin-bottom:28px;border:2px solid {result["border"]};'
+        f'border-radius:10px;overflow:hidden;background:#fff;">'
+        # 標題列
+        f'<div style="background:{result["border"]};padding:12px 16px;'
+        f'display:flex;justify-content:space-between;align-items:center;">'
+        f'<span style="color:#fff;font-size:16px;font-weight:bold;">'
+        f'{result["emoji"]} {name} ({ticker.replace(".TW","").replace(".tw","")})</span>'
+        f'<span style="color:#fff;font-size:20px;font-weight:bold;">{result["close"]:.2f}</span>'
+        f'</div>'
+        # 個股備註
+        f'{note_html}'
+        # 訊號摘要
+        f'<div style="background:{result["bg"]};padding:10px 16px;border-bottom:2px solid {result["border"]}33;">'
+        f'<strong style="font-size:14px;">{result["summary"]}</strong>'
+        f'<span style="color:#555;margin-left:8px;font-size:13px;">— {result["advice"]}</span></div>'
+        # 指標明細表格
+        f'<table style="width:100%;border-collapse:collapse;">{rows}</table>'
+        # 金字塔建議
+        f'{pyramid_html}</div>'
+    )
 
 
 # ── 產生總覽表格 ─────────────────────────────────────────────
