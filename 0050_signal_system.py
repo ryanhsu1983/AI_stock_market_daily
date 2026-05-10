@@ -252,75 +252,89 @@ def evaluate(df: pd.DataFrame, scfg: dict) -> dict:
     trend_color = {"healthy_bull":"#2ecc71","weak_bull":"#f39c12",
                    "bear":"#e74c3c","neutral":"#95a5a6"}[trend]
     items.append(("趨勢環境", trend_label, trend_color,
-                  f"MA{s}={ma_s:.1f} MA{m}={ma_m:.1f} MA{l}={ma_l:.1f}｜"
-                  f"收盤{'站上' if above_ma_s else '跌破'}{s}日線，{s}日線{'↑' if ma_s_dir else '↓'}"))
-
+                  f"MA{s}={ma_s:.1f}｜MA{m}={ma_m:.1f}｜MA{l}={ma_l:.1f}｜"
+                  f"收盤{'站上' if above_ma_s else '跌破'}{s}日線，{s}日線{'↑' if ma_s_dir else '↓'}｜"
+                  f"多頭健康=MA{m}>MA{l}且站上{s}日線，多頭轉弱=均線排列但跌破短線支撐，空頭=MA{m}<MA{l}"))
     # ── 第二層：時機指標 ──────────────────────────────────────
 
     # MACD
+    # 計算歷史MACD柱狀範圍供參考
+    hist_series = df["MACD_hist"].dropna()
+    hist_p10 = float(hist_series.quantile(0.10))
+    hist_p90 = float(hist_series.quantile(0.90))
+    macd_range_note = f"當前={hist:.4f}｜歷史正常區間[{hist_p10:.4f}～{hist_p90:.4f}]｜正=多頭動能，負=空頭動能，0軸為中性"
     if hist > 0 and hist_p <= 0:
         l2_buy += 1
-        items.append(("MACD", "柱狀由負翻正", "#2ecc71", f"hist={hist:.4f}｜動能轉強"))
+        items.append(("MACD", "柱狀由負翻正 ✅", "#2ecc71", macd_range_note + "｜剛翻正，動能轉強"))
     elif hist < 0 and hist_p >= 0:
         l2_sell += 1
-        items.append(("MACD", "柱狀由正翻負", "#e74c3c", f"hist={hist:.4f}｜動能轉弱"))
+        items.append(("MACD", "柱狀由正翻負 ⚠️", "#e74c3c", macd_range_note + "｜剛翻負，動能轉弱"))
     else:
-        items.append(("MACD", f"柱狀持續{'正' if hist>0 else '負'}", "#95a5a6", f"hist={hist:.4f}"))
+        sign = "正（多頭）" if hist > 0 else "負（空頭）"
+        items.append(("MACD", f"柱狀持續為{sign}", "#95a5a6", macd_range_note))
 
     # KD（使用個股門檻）
     kd_buy  = k > d and kp <= dp and k < thr["kd_buy"]
     kd_sell = k < d and kp >= dp and k > thr["kd_sell"]
+    kd_note = (f"當前 K={k:.1f} D={d:.1f}｜"
+               f"買進區：K<{thr['kd_buy']}且K上穿D｜"
+               f"賣出區：K>{thr['kd_sell']}且K下穿D｜"
+               f"正常區間：{thr['kd_buy']}～{thr['kd_sell']}")
     if kd_buy:
         l2_buy += 1
-        items.append(("KD", "低檔黃金交叉", "#2ecc71",
-                      f"K={k:.1f} D={d:.1f}｜門檻<{thr['kd_buy']}"))
+        items.append(("KD", "低檔黃金交叉 ✅", "#2ecc71", kd_note))
     elif kd_sell:
         l2_sell += 1
-        items.append(("KD", "高檔死亡交叉", "#e74c3c",
-                      f"K={k:.1f} D={d:.1f}｜門檻>{thr['kd_sell']}"))
+        items.append(("KD", "高檔死亡交叉 ⚠️", "#e74c3c", kd_note))
     else:
-        items.append(("KD", "無交叉訊號", "#95a5a6", f"K={k:.1f} D={d:.1f}"))
+        items.append(("KD", "無交叉訊號", "#95a5a6", kd_note))
 
     # 短線乖離率（使用個股門檻）
     b20_buy  = thr.get("bias20_buy",  thr.get("bias_buy",  -4.0))
     b20_sell = thr.get("bias20_sell", thr.get("bias_sell",  5.0))
+    bias20_note = (f"當前={bias20:.2f}%（收盤偏離MA{m}的幅度）｜"
+                   f"正常區間：{b20_buy}%～+{b20_sell}%｜"
+                   f"低於{b20_buy}%=跌深買進區，高於+{b20_sell}%=漲多賣出區")
     if bias20 < b20_buy:
         l2_buy += 1
-        items.append(("乖離率", "跌深反彈機會", "#2ecc71",
-                      f"{bias20:.2f}%｜門檻{b20_buy}%"))
+        items.append(("乖離率(MA{})".format(m), "跌深反彈機會 ✅", "#2ecc71", bias20_note))
     elif bias20 > b20_sell:
         l2_sell += 1
-        items.append(("乖離率", "漲幅過高警示", "#e74c3c",
-                      f"{bias20:.2f}%｜門檻+{b20_sell}%"))
+        items.append(("乖離率(MA{})".format(m), "漲幅過高警示 ⚠️", "#e74c3c", bias20_note))
     else:
-        items.append(("乖離率", "正常範圍", "#95a5a6", f"{bias20:.2f}%"))
+        items.append(("乖離率(MA{})".format(m), "正常範圍", "#95a5a6", bias20_note))
 
     # 均線交叉
     ma_bull = ma_m > ma_l and ma_m_prev <= ma_l_prev
     ma_bear = ma_m < ma_l and ma_m_prev >= ma_l_prev
+    ma_note = (f"MA{s}={ma_s:.1f}｜MA{m}={ma_m:.1f}｜MA{l}={ma_l:.1f}｜"
+               f"MA{m}>MA{l}=多頭排列，MA{m}<MA{l}=空頭排列｜"
+               f"剛發生交叉才觸發訊號，持續排列為中性")
     if ma_bull:
         l2_buy += 1
-        items.append(("均線交叉", f"MA{m}上穿MA{l}", "#2ecc71", "趨勢確立"))
+        items.append(("均線交叉", f"MA{m}上穿MA{l} ✅", "#2ecc71", ma_note + "｜趨勢剛確立"))
     elif ma_bear:
         l2_sell += 1
-        items.append(("均線交叉", f"MA{m}下穿MA{l}", "#e74c3c", "趨勢反轉"))
+        items.append(("均線交叉", f"MA{m}下穿MA{l} ⚠️", "#e74c3c", ma_note + "｜趨勢剛反轉"))
     else:
-        items.append(("均線交叉", "維持現狀", "#95a5a6",
-                      f"MA{m}{'>' if ma_m>ma_l else '<'}MA{l}"))
+        rel = ">" if ma_m > ma_l else "<"
+        status = "多頭排列持續" if ma_m > ma_l else "空頭排列持續"
+        items.append(("均線交叉", status, "#95a5a6", ma_note))
 
     # 量能趨勢（可關閉）
     vol_ratio = vol / vol_ma if vol_ma > 0 else 1
     if use_vol:
+        vol_note = (f"今日成交量／{thr['vol_ma_period']}日均量={vol_ratio:.2f}倍｜"
+                    f"正常範圍：0.8～1.2倍｜"
+                    f">1.2倍且價漲=量能擴張買訊，<0.8倍=量能萎縮警示")
         if vol_trend > 0 and vol_ratio > 1.2:
-            vol_label, vol_color = "量能擴張", "#2ecc71"
+            vol_label, vol_color = "量能擴張 ✅", "#2ecc71"
             if close > float(prev["Close"]): l2_buy += 1
         elif vol_trend < 0 and vol_ratio < 0.8:
-            vol_label, vol_color = "量能萎縮", "#e74c3c"
+            vol_label, vol_color = "量能萎縮 ⚠️", "#e74c3c"
         else:
             vol_label, vol_color = "量能平穩", "#95a5a6"
-        items.append(("量能趨勢", vol_label, vol_color,
-                      f"今日量/均量={vol_ratio:.2f}｜{thr['vol_ma_period']}日均量"
-                      f"趨勢{'↑' if vol_trend>0 else '↓' if vol_trend<0 else '→'}"))
+        items.append(("量能趨勢", vol_label, vol_color, vol_note))
     else:
         items.append(("量能趨勢", "已關閉（槓桿ETF不適用）", "#bdc3c7",
                       "槓桿ETF成交量主要來自當沖套利，無法反映真實多空"))
@@ -330,27 +344,34 @@ def evaluate(df: pd.DataFrame, scfg: dict) -> dict:
         obv_rising  = obv > obv_ma and obv > obv_prev
         obv_falling = obv < obv_ma and obv < obv_prev
         price_up    = close > float(prev["Close"])
+        obv_note = (f"OBV={'高於' if obv>obv_ma else '低於'}{thr['obv_ma_period']}日均線｜"
+                    f"OBV持續累積=買盤入場，OBV持續下滑=賣盤出場｜"
+                    f"OBV領先價格=強力買訊，價漲OBV跌=背離警示")
         if obv_rising and price_up:
-            obv_label, obv_color = "量價齊揚",    "#2ecc71"; l2_buy  += 1
+            obv_label, obv_color = "量價齊揚 ✅",    "#2ecc71"; l2_buy  += 1
         elif obv_rising and not price_up:
-            obv_label, obv_color = "OBV領先價格", "#3498db"
+            obv_label, obv_color = "OBV領先價格 💡", "#3498db"
         elif obv_falling and not price_up:
-            obv_label, obv_color = "量價齊跌",    "#e74c3c"; l2_sell += 1
+            obv_label, obv_color = "量價齊跌 ⚠️",   "#e74c3c"; l2_sell += 1
         elif obv_falling and price_up:
-            obv_label, obv_color = "價漲量縮背離","#f39c12"
+            obv_label, obv_color = "價漲量縮背離 ⚠️","#f39c12"
         else:
-            obv_label, obv_color = "OBV中性",     "#95a5a6"
-        items.append(("OBV", obv_label, obv_color,
-                      f"OBV={'高於' if obv>obv_ma else '低於'}{thr['obv_ma_period']}日均線"))
+            obv_label, obv_color = "OBV中性",        "#95a5a6"
+        items.append(("OBV", obv_label, obv_color, obv_note))
     else:
         items.append(("OBV", "已關閉（槓桿ETF不適用）", "#bdc3c7",
                       "槓桿ETF成交量結構特殊，OBV訊號不具參考價值"))
 
     # 價格行為
-    is_red = close > float(latest["Open"])
-    items.append(("價格行為", "紅K" if is_red else "黑K",
+    is_red   = close > float(latest["Open"])
+    open_p   = float(latest["Open"])
+    chg_pct  = (close - open_p) / open_p * 100
+    price_note = (f"開盤={open_p:.2f}｜收盤={close:.2f}｜當日漲跌={chg_pct:+.2f}%｜"
+                  f"紅K=收盤>開盤（買方強勢），黑K=收盤<開盤（賣方強勢）")
+    items.append(("價格行為",
+                  f"紅K（+{chg_pct:.2f}%）" if is_red else f"黑K（{chg_pct:.2f}%）",
                   "#2ecc71" if is_red else "#e74c3c",
-                  f"開={float(latest['Open']):.2f} 收={close:.2f}"))
+                  price_note))
 
     # ── 綜合訊號 ──────────────────────────────────────────────
     if b60["locked"]:
