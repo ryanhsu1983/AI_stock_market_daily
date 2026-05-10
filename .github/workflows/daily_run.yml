@@ -1,0 +1,28 @@
+name: 0050 每日訊號分析
+
+on:
+  schedule:
+    # 台灣時間 14:00 = UTC 06:00（台股收盤後30分鐘）
+    - cron: '0 6 * * 1-5'   # 週一到週五執行，週末跳過
+  workflow_dispatch:          # 允許手動在網頁上觸發
+
+jobs:
+  run-signal:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 取得程式碼
+        uses: actions/checkout@v4
+
+      - name: 安裝 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安裝套件
+        run: pip install yfinance pandas requests
+
+      - name: 執行訊號分析
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: python 0050_signal_system.py
