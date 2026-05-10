@@ -1,10 +1,10 @@
 {
   "watchlist": [
     {"ticker": "0050.TW",   "name": "元大台灣50"},
-    {"ticker": "2330.TW", "name": "台積電"}
+    {"ticker": "006208.TW", "name": "富邦台灣50"}
   ],
 
-  "lookback_days": 120,
+  "lookback_days": 600,
 
   "thresholds": {
     "kd_buy":        30,
@@ -19,6 +19,13 @@
     "short": 10,
     "mid":   20,
     "long":  60
+  },
+
+  "pyramid": {
+    "add_per_drop_pct":    5.0,
+    "add_ratio_pct":      20.0,
+    "time_rebalance_days": 20,
+    "time_add_ratio_pct":   5.0
   },
 
   "email": {
