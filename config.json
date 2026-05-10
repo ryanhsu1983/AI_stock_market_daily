@@ -1,0 +1,25 @@
+{
+  "ticker": "0050.TW",
+  "lookback_days": 120,
+
+  "thresholds": {
+    "kd_buy":    30,
+    "kd_sell":   70,
+    "bias_buy":  -4.0,
+    "bias_sell":  5.0
+  },
+
+  "ma_periods": {
+    "short":  10,
+    "mid":    20,
+    "long":   60
+  },
+
+  "notify": {
+    "on_strong_buy":  true,
+    "on_weak_buy":    true,
+    "on_warning":     true,
+    "on_strong_sell": true,
+    "on_neutral":     false
+  }
+}
