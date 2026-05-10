@@ -27,5 +27,5 @@ jobs:
 
       - name: 執行訊號分析
         env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          GMAIL_PASSWORD: ${{ secrets.GMAIL_PASSWORD }}
         run: python 0050_signal_system.py
