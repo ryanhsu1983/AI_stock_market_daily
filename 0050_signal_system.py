@@ -1,15 +1,13 @@
 """
-每日股市訊號系統
-================
+每日股市訊號系統 v3
+===================
 Repository : github.com/ryanhsu1983/AI_stock_0050
-說明        : 每日台股收盤後自動執行，分析 watchlist 中所有股票，
-              產生 HTML 格式每日報告寄送至指定 Email。
-              所有參數從 config.json 讀取。
+新增模組：
+  - BIAS60 Z-Score 過熱/超跌偵測（統計乖離回歸）
+  - 金字塔分批建倉提醒（執行邏輯）
 """
 
-import json
-import os
-import smtplib
+import json, os, smtplib, numpy as np
 import yfinance as yf
 import pandas as pd
 from datetime import datetime, timedelta
@@ -20,26 +18,22 @@ from pathlib import Path
 
 # ── 讀取設定 ────────────────────────────────────────────────
 def load_config() -> dict:
-    config_path = Path(__file__).parent / "config.json"
-    with open(config_path, "r", encoding="utf-8") as f:
+    with open(Path(__file__).parent / "config.json", "r", encoding="utf-8") as f:
         return json.load(f)
 
 
-# ── 抓取資料 ────────────────────────────────────────────────
+# ── 抓取資料（長期需要更多歷史資料計算Z-Score）───────────────
 def fetch_data(ticker: str, days: int) -> pd.DataFrame:
     end   = datetime.today()
     start = end - timedelta(days=days)
-    df = yf.download(
-        ticker,
-        start=start.strftime("%Y-%m-%d"),
-        end=end.strftime("%Y-%m-%d"),
-        progress=False,
-        auto_adjust=True,
-    )
+    df = yf.download(ticker,
+                     start=start.strftime("%Y-%m-%d"),
+                     end=end.strftime("%Y-%m-%d"),
+                     progress=False, auto_adjust=True)
     if df.empty:
         raise ValueError(f"無法取得 {ticker} 資料")
     df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
-    return df[["Open", "High", "Low", "Close", "Volume"]].dropna()
+    return df[["Open","High","Low","Close","Volume"]].dropna()
 
 
 # ── 計算指標 ────────────────────────────────────────────────
@@ -52,6 +46,20 @@ def calc_indicators(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     df[f"MA{s}"] = df["Close"].rolling(s).mean()
     df[f"MA{m}"] = df["Close"].rolling(m).mean()
     df[f"MA{l}"] = df["Close"].rolling(l).mean()
+
+    # 季線（60日）乖離率 — 用於 Z-Score
+    ma60 = df["Close"].rolling(60).mean()
+    df["BIAS60"] = (df["Close"] - ma60) / ma60 * 100
+
+    # BIAS60 歷史 Z-Score（以全部可用資料計算分佈）
+    bias60_mean       = df["BIAS60"].mean()
+    bias60_std        = df["BIAS60"].std()
+    df["BIAS60_Z"]    = (df["BIAS60"] - bias60_mean) / bias60_std
+
+    # 歷史分位數門檻（95% / 5%）
+    df.attrs["bias60_p95"] = float(df["BIAS60"].quantile(0.95))
+    df.attrs["bias60_p05"] = float(df["BIAS60"].quantile(0.05))
+    df.attrs["bias60_mean"] = bias60_mean
 
     # KD
     low_min  = df["Low"].rolling(9).min()
@@ -67,28 +75,125 @@ def calc_indicators(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     df["Signal"]    = df["DIF"].ewm(span=9, adjust=False).mean()
     df["MACD_hist"] = df["DIF"] - df["Signal"]
 
-    # 乖離率
-    df["Bias"] = (df["Close"] - df[f"MA{m}"]) / df[f"MA{m}"] * 100
+    # 短線乖離率（MA20）
+    df["Bias20"] = (df["Close"] - df[f"MA{m}"]) / df[f"MA{m}"] * 100
 
-    # 量能趨勢（Vol MA）
-    vp = thr["vol_ma_period"]
+    # 量能趨勢
+    vp           = thr["vol_ma_period"]
     df["Vol_MA"] = df["Volume"].rolling(vp).mean()
-    df["Vol_Trend"] = df["Vol_MA"] - df["Vol_MA"].shift(3)  # 3日斜率
+    df["Vol_Trend"] = df["Vol_MA"] - df["Vol_MA"].shift(3)
 
     # OBV
     obv = [0]
     for i in range(1, len(df)):
-        if df["Close"].iloc[i] > df["Close"].iloc[i - 1]:
+        if df["Close"].iloc[i] > df["Close"].iloc[i-1]:
             obv.append(obv[-1] + df["Volume"].iloc[i])
-        elif df["Close"].iloc[i] < df["Close"].iloc[i - 1]:
+        elif df["Close"].iloc[i] < df["Close"].iloc[i-1]:
             obv.append(obv[-1] - df["Volume"].iloc[i])
         else:
             obv.append(obv[-1])
-    df["OBV"] = obv
-    op = thr["obv_ma_period"]
-    df["OBV_MA"] = df["OBV"].rolling(op).mean()
+    df["OBV"]    = obv
+    df["OBV_MA"] = df["OBV"].rolling(thr["obv_ma_period"]).mean()
 
     return df
+
+
+# ── BIAS60 Z-Score 評估 ──────────────────────────────────────
+def eval_bias60(df: pd.DataFrame, thr: dict) -> dict:
+    """
+    回傳:
+      zone        : "overheated" | "oversold" | "normal"
+      locked      : True = 強制鎖定，禁止發買進訊號
+      bias60      : 當前季線乖離率
+      z_score     : 當前Z值
+      p95 / p05   : 歷史分位數
+      label / color / note
+    """
+    latest  = df.iloc[-1]
+    bias60  = float(latest["BIAS60"])
+    z       = float(latest["BIAS60_Z"])
+    p95     = df.attrs["bias60_p95"]
+    p05     = df.attrs["bias60_p05"]
+
+    if bias60 >= p95:
+        zone   = "overheated"
+        locked = True
+        label  = f"🔥 過熱鎖定（季線乖離{bias60:.1f}%，歷史95%分位）"
+        color  = "#c0392b"
+        note   = f"Z={z:.2f}｜超過歷史95%分位({p95:.1f}%)｜強制禁止買進"
+    elif bias60 <= p05:
+        zone   = "oversold"
+        locked = False
+        label  = f"❄️ 超跌部署區（季線乖離{bias60:.1f}%，歷史5%分位）"
+        color  = "#2980b9"
+        note   = f"Z={z:.2f}｜低於歷史5%分位({p05:.1f}%)｜統計上的黃金建倉區"
+    else:
+        zone   = "normal"
+        locked = False
+        label  = f"正常範圍（季線乖離{bias60:.1f}%）"
+        color  = "#95a5a6"
+        note   = f"Z={z:.2f}｜介於歷史5%({p05:.1f}%)～95%({p95:.1f}%)分位之間"
+
+    return dict(zone=zone, locked=locked, bias60=bias60,
+                z_score=z, p95=p95, p05=p05,
+                label=label, color=color, note=note)
+
+
+# ── 金字塔建倉計算 ───────────────────────────────────────────
+def calc_pyramid(df: pd.DataFrame, cfg: dict, signal_level: str) -> dict:
+    """
+    金字塔分批建倉邏輯：
+    - 每回落 5% 觸發一次加碼提醒
+    - 每次建議投入剩餘資金的 20%
+    - 若盤整超過 20 個交易日且尚未進場，提醒時間性補位（5%）
+    回傳建倉建議文字與比例
+    """
+    py  = cfg.get("pyramid", {})
+    drop_step    = py.get("add_per_drop_pct",   5.0)   # 每跌幾%加碼
+    add_ratio    = py.get("add_ratio_pct",      20.0)  # 每次投入剩餘資金%
+    time_days    = py.get("time_rebalance_days", 20)   # 盤整幾日補位
+    time_ratio   = py.get("time_add_ratio_pct",  5.0)  # 時間補位比例
+
+    close    = float(df["Close"].iloc[-1])
+    recent   = df["Close"].iloc[-time_days:]
+    high_ref = float(recent.max())
+    drop_pct = (close - high_ref) / high_ref * 100   # 負值表示回落幅度
+
+    # 判斷盤整：近N日最高最低價差 < 5%
+    range_pct = (float(recent.max()) - float(recent.min())) / float(recent.min()) * 100
+    is_consolidating = range_pct < 5.0
+
+    suggestions = []
+
+    if signal_level in ("STRONG_BUY", "WEAK_BUY"):
+        # 計算目前回落幅度對應的加碼批次
+        batches = int(abs(drop_pct) / drop_step) if drop_pct < 0 else 0
+
+        if batches == 0:
+            suggestions.append(
+                f"📌 第1批建倉：建議投入可用資金 <b>{add_ratio:.0f}%</b>（目前未回落，首批試單）"
+            )
+        else:
+            suggestions.append(
+                f"📌 第{batches+1}批加碼：距高點回落 {abs(drop_pct):.1f}%，"
+                f"建議再投入剩餘資金 <b>{add_ratio:.0f}%</b>"
+            )
+            suggestions.append(
+                f"　　累計已達 {batches} 次加碼條件（每跌 {drop_step:.0f}% 加一批）"
+            )
+
+        if is_consolidating:
+            suggestions.append(
+                f"⏱️ 時間補位提醒：近 {time_days} 日盤整幅度僅 {range_pct:.1f}%，"
+                f"可考慮投入剩餘資金 <b>{time_ratio:.0f}%</b> 進行時間性補位"
+            )
+
+    return dict(
+        drop_pct=drop_pct,
+        is_consolidating=is_consolidating,
+        range_pct=range_pct,
+        suggestions=suggestions,
+    )
 
 
 # ── 評估訊號 ────────────────────────────────────────────────
@@ -107,11 +212,11 @@ def evaluate(df: pd.DataFrame, cfg: dict) -> dict:
     ma_s_prev = float(prev[f"MA{s}"])
     ma_m_prev = float(prev[f"MA{m}"])
     ma_l_prev = float(prev[f"MA{l}"])
-    k, d      = float(latest["K"]),  float(latest["D"])
-    kp, dp    = float(prev["K"]),    float(prev["D"])
+    k, d      = float(latest["K"]),       float(latest["D"])
+    kp, dp    = float(prev["K"]),         float(prev["D"])
     hist      = float(latest["MACD_hist"])
     hist_p    = float(prev["MACD_hist"])
-    bias      = float(latest["Bias"])
+    bias20    = float(latest["Bias20"])
     vol       = float(latest["Volume"])
     vol_ma    = float(latest["Vol_MA"])
     vol_trend = float(latest["Vol_Trend"])
@@ -119,9 +224,12 @@ def evaluate(df: pd.DataFrame, cfg: dict) -> dict:
     obv_ma    = float(latest["OBV_MA"])
     obv_prev  = float(prev["OBV"])
 
-    items   = []   # 指標明細列表
-    l2_buy  = 0
-    l2_sell = 0
+    items  = []
+    l2_buy = l2_sell = 0
+
+    # ── BIAS60 Z-Score 模組（最優先評估，可鎖定整體訊號）───────
+    b60 = eval_bias60(df, thr)
+    items.append(("BIAS60 Z-Score", b60["label"], b60["color"], b60["note"]))
 
     # ── 第一層：趨勢環境 ──────────────────────────────────────
     ma_s_dir   = ma_s > ma_s_prev
@@ -136,20 +244,10 @@ def evaluate(df: pd.DataFrame, cfg: dict) -> dict:
     else:
         trend = "neutral"
 
-    trend_label = {
-        "healthy_bull": "多頭健康",
-        "weak_bull":    "多頭轉弱",
-        "bear":         "空頭確認",
-        "neutral":      "方向不明",
-    }[trend]
-
-    trend_color = {
-        "healthy_bull": "#2ecc71",
-        "weak_bull":    "#f39c12",
-        "bear":         "#e74c3c",
-        "neutral":      "#95a5a6",
-    }[trend]
-
+    trend_label = {"healthy_bull":"多頭健康","weak_bull":"多頭轉弱",
+                   "bear":"空頭確認","neutral":"方向不明"}[trend]
+    trend_color = {"healthy_bull":"#2ecc71","weak_bull":"#f39c12",
+                   "bear":"#e74c3c","neutral":"#95a5a6"}[trend]
     items.append(("趨勢環境", trend_label, trend_color,
                   f"MA{s}={ma_s:.1f} MA{m}={ma_m:.1f} MA{l}={ma_l:.1f}｜"
                   f"收盤{'站上' if above_ma_s else '跌破'}{s}日線，{s}日線{'↑' if ma_s_dir else '↓'}"))
@@ -164,8 +262,7 @@ def evaluate(df: pd.DataFrame, cfg: dict) -> dict:
         l2_sell += 1
         items.append(("MACD", "柱狀由正翻負", "#e74c3c", f"hist={hist:.4f}｜動能轉弱"))
     else:
-        sign = "正" if hist > 0 else "負"
-        items.append(("MACD", f"柱狀持續為{sign}", "#95a5a6", f"hist={hist:.4f}"))
+        items.append(("MACD", f"柱狀持續為{'正' if hist>0 else '負'}", "#95a5a6", f"hist={hist:.4f}"))
 
     # KD
     kd_buy  = k > d and kp <= dp and k < thr["kd_buy"]
@@ -179,15 +276,15 @@ def evaluate(df: pd.DataFrame, cfg: dict) -> dict:
     else:
         items.append(("KD", "無交叉訊號", "#95a5a6", f"K={k:.1f} D={d:.1f}"))
 
-    # 乖離率
-    if bias < thr["bias_buy"]:
+    # 短線乖離率（MA20）
+    if bias20 < thr["bias_buy"]:
         l2_buy += 1
-        items.append(("乖離率", "跌深反彈機會", "#2ecc71", f"{bias:.2f}%｜門檻{thr['bias_buy']}%"))
-    elif bias > thr["bias_sell"]:
+        items.append(("乖離率(MA20)", "跌深反彈機會", "#2ecc71", f"{bias20:.2f}%｜門檻{thr['bias_buy']}%"))
+    elif bias20 > thr["bias_sell"]:
         l2_sell += 1
-        items.append(("乖離率", "漲幅過高警示", "#e74c3c", f"{bias:.2f}%｜門檻+{thr['bias_sell']}%"))
+        items.append(("乖離率(MA20)", "漲幅過高警示", "#e74c3c", f"{bias20:.2f}%｜門檻+{thr['bias_sell']}%"))
     else:
-        items.append(("乖離率", "正常範圍", "#95a5a6", f"{bias:.2f}%"))
+        items.append(("乖離率(MA20)", "正常範圍", "#95a5a6", f"{bias20:.2f}%"))
 
     # 均線交叉
     ma_bull = ma_m > ma_l and ma_m_prev <= ma_l_prev
@@ -199,95 +296,107 @@ def evaluate(df: pd.DataFrame, cfg: dict) -> dict:
         l2_sell += 1
         items.append(("均線交叉", f"MA{m}剛下穿MA{l}", "#e74c3c", "趨勢反轉"))
     else:
-        rel = ">" if ma_m > ma_l else "<"
-        items.append(("均線交叉", "維持現狀", "#95a5a6", f"MA{m}{rel}MA{l}"))
+        items.append(("均線交叉", "維持現狀", "#95a5a6",
+                      f"MA{m}{'>' if ma_m>ma_l else '<'}MA{l}"))
 
-    # ── 量能趨勢 ──────────────────────────────────────────────
+    # 量能趨勢
     vol_ratio = vol / vol_ma if vol_ma > 0 else 1
     if vol_trend > 0 and vol_ratio > 1.2:
-        vol_label = "量能擴張"
-        vol_color = "#2ecc71"
-        if close > float(prev["Close"]):
-            l2_buy += 1
+        vol_label, vol_color = "量能擴張", "#2ecc71"
+        if close > float(prev["Close"]): l2_buy += 1
     elif vol_trend < 0 and vol_ratio < 0.8:
-        vol_label = "量能萎縮"
-        vol_color = "#e74c3c"
+        vol_label, vol_color = "量能萎縮", "#e74c3c"
     else:
-        vol_label = "量能平穩"
-        vol_color = "#95a5a6"
-    vp = thr["vol_ma_period"]
+        vol_label, vol_color = "量能平穩", "#95a5a6"
     items.append(("量能趨勢", vol_label, vol_color,
-                  f"今日量/均量={vol_ratio:.2f}｜{vp}日均量趨勢{'↑' if vol_trend>0 else '↓' if vol_trend<0 else '→'}"))
+                  f"今日量/均量={vol_ratio:.2f}｜{thr['vol_ma_period']}日均量"
+                  f"趨勢{'↑' if vol_trend>0 else '↓' if vol_trend<0 else '→'}"))
 
-    # ── OBV ───────────────────────────────────────────────────
-    obv_rising = obv > obv_ma and obv > obv_prev
+    # OBV
+    obv_rising  = obv > obv_ma and obv > obv_prev
     obv_falling = obv < obv_ma and obv < obv_prev
-    price_rising = close > float(prev["Close"])
-
-    if obv_rising and price_rising:
-        obv_label = "量價齊揚"
-        obv_color = "#2ecc71"
-        l2_buy += 1
-    elif obv_rising and not price_rising:
-        obv_label = "OBV領先價格"
-        obv_color = "#3498db"
-    elif obv_falling and not price_rising:
-        obv_label = "量價齊跌"
-        obv_color = "#e74c3c"
-        l2_sell += 1
-    elif obv_falling and price_rising:
-        obv_label = "價漲量縮背離"
-        obv_color = "#f39c12"
+    price_up    = close > float(prev["Close"])
+    if obv_rising and price_up:
+        obv_label, obv_color = "量價齊揚", "#2ecc71";  l2_buy  += 1
+    elif obv_rising and not price_up:
+        obv_label, obv_color = "OBV領先價格", "#3498db"
+    elif obv_falling and not price_up:
+        obv_label, obv_color = "量價齊跌", "#e74c3c";  l2_sell += 1
+    elif obv_falling and price_up:
+        obv_label, obv_color = "價漲量縮背離", "#f39c12"
     else:
-        obv_label = "OBV中性"
-        obv_color = "#95a5a6"
-    op = thr["obv_ma_period"]
+        obv_label, obv_color = "OBV中性", "#95a5a6"
     items.append(("OBV", obv_label, obv_color,
-                  f"OBV={'高於' if obv>obv_ma else '低於'}{op}日均線"))
+                  f"OBV={'高於' if obv>obv_ma else '低於'}{thr['obv_ma_period']}日均線"))
 
-    # ── 第三層：價格行為 ──────────────────────────────────────
+    # 價格行為
     is_red = close > float(latest["Open"])
-    items.append(("價格行為", "紅K" if is_red else "黑K", "#2ecc71" if is_red else "#e74c3c",
+    items.append(("價格行為", "紅K" if is_red else "黑K",
+                  "#2ecc71" if is_red else "#e74c3c",
                   f"開={float(latest['Open']):.2f} 收={close:.2f}"))
 
-    # ── 綜合訊號 ──────────────────────────────────────────────
-    if trend == "healthy_bull" and l2_buy >= 2:
-        level, emoji, summary = "STRONG_BUY",  "🔴", "強買進訊號"
-        advice = "多頭健康，多指標共振，建議關注進場機會"
-        bg     = "#fdecea"
-        border = "#e74c3c"
-    elif (trend == "healthy_bull" and l2_buy == 1) or \
-         (trend == "weak_bull"    and l2_buy >= 2):
-        level, emoji, summary = "WEAK_BUY",    "🟡", "弱買進提醒"
-        advice = "單一訊號或趨勢轉弱，列入觀察，勿躁進"
-        bg     = "#fef9e7"
-        border = "#f39c12"
-    elif trend in ("weak_bull", "healthy_bull") and not ma_s_dir:
-        level, emoji, summary = "WARNING",     "🟠", "風險警示"
-        advice = f"{s}日線走弱，建議降低部位或暫緩操作"
-        bg     = "#fef5e7"
-        border = "#e67e22"
-    elif trend == "bear" and l2_sell >= 2:
-        level, emoji, summary = "STRONG_SELL", "🔵", "強賣出訊號"
-        advice = "空頭確認，多指標共振，建議考慮出場"
-        bg     = "#eaf4fb"
-        border = "#3498db"
-    elif trend == "neutral":
-        level, emoji, summary = "NEUTRAL",     "⚪", "方向不明"
-        advice = "均線糾結或訊號矛盾，建議觀望"
-        bg     = "#f8f9fa"
-        border = "#95a5a6"
+    # ── 綜合訊號（BIAS60過熱時強制鎖定買進）──────────────────
+    if b60["locked"]:
+        # 過熱鎖定：不論其他指標，禁止買進
+        if l2_sell >= 2 or trend == "bear":
+            level, emoji, summary = "STRONG_SELL", "🔵", "強賣出訊號"
+            advice = f"市場過熱（季線乖離{b60['bias60']:.1f}%超歷史95%分位），且技術面轉弱，建議出場"
+            bg, border = "#eaf4fb", "#3498db"
+        else:
+            level, emoji, summary = "OVERHEATED", "🔥", "過熱鎖定｜禁止追買"
+            advice = (f"季線乖離率{b60['bias60']:.1f}%已超過歷史95%分位({b60['p95']:.1f}%)，"
+                      f"Z-Score={b60['z_score']:.2f}，統計上屬極端過熱區，強制停止買進")
+            bg, border = "#fdecea", "#c0392b"
+
+    elif b60["zone"] == "oversold":
+        # 超跌部署區：提升買進信心
+        if trend in ("healthy_bull","weak_bull") and l2_buy >= 1:
+            level, emoji, summary = "STRONG_BUY", "🔴", "強買進訊號（超跌加碼區）"
+            advice = (f"季線乖離率{b60['bias60']:.1f}%低於歷史5%分位({b60['p05']:.1f}%)，"
+                      f"統計超跌，搭配技術面買訊，為高信心建倉機會")
+            bg, border = "#fdecea", "#e74c3c"
+        else:
+            level, emoji, summary = "WEAK_BUY", "🟡", "超跌觀察區"
+            advice = f"季線乖離統計超跌，但技術面尚未確認，可列入觀察"
+            bg, border = "#fef9e7", "#f39c12"
+
     else:
-        level, emoji, summary = "NEUTRAL",     "⚪", "無明顯訊號"
-        advice = "目前無強烈進出依據，繼續觀察"
-        bg     = "#f8f9fa"
-        border = "#95a5a6"
+        # 正常區間：原始邏輯
+        if trend == "healthy_bull" and l2_buy >= 2:
+            level, emoji, summary = "STRONG_BUY",  "🔴", "強買進訊號"
+            advice = "多頭健康，多指標共振，建議關注進場機會"
+            bg, border = "#fdecea", "#e74c3c"
+        elif (trend == "healthy_bull" and l2_buy == 1) or \
+             (trend == "weak_bull"    and l2_buy >= 2):
+            level, emoji, summary = "WEAK_BUY",    "🟡", "弱買進提醒"
+            advice = "單一訊號或趨勢轉弱，列入觀察，勿躁進"
+            bg, border = "#fef9e7", "#f39c12"
+        elif trend in ("weak_bull","healthy_bull") and not ma_s_dir:
+            level, emoji, summary = "WARNING",     "🟠", "風險警示"
+            advice = f"{s}日線走弱，建議降低部位或暫緩操作"
+            bg, border = "#fef5e7", "#e67e22"
+        elif trend == "bear" and l2_sell >= 2:
+            level, emoji, summary = "STRONG_SELL", "🔵", "強賣出訊號"
+            advice = "空頭確認，多指標共振，建議考慮出場"
+            bg, border = "#eaf4fb", "#3498db"
+        elif trend == "neutral":
+            level, emoji, summary = "NEUTRAL",     "⚪", "方向不明"
+            advice = "均線糾結或訊號矛盾，建議觀望"
+            bg, border = "#f8f9fa", "#95a5a6"
+        else:
+            level, emoji, summary = "NEUTRAL",     "⚪", "無明顯訊號"
+            advice = "目前無強烈進出依據，繼續觀察"
+            bg, border = "#f8f9fa", "#95a5a6"
+
+    # ── 金字塔建倉建議 ────────────────────────────────────────
+    pyramid = calc_pyramid(df, cfg, level)
 
     return dict(
         level=level, emoji=emoji, summary=summary, advice=advice,
         bg=bg, border=border, items=items,
-        close=close, bias=bias, is_red=is_red,
+        close=close, bias20=bias20, is_red=is_red,
         l2_buy=l2_buy, l2_sell=l2_sell,
+        b60=b60, pyramid=pyramid,
     )
 
 
@@ -297,34 +406,44 @@ def stock_html_block(name: str, ticker: str, result: dict) -> str:
     for label, value, color, note in result["items"]:
         rows += f"""
         <tr>
-          <td style="padding:6px 10px;color:#555;width:90px;">{label}</td>
-          <td style="padding:6px 10px;font-weight:bold;color:{color};">{value}</td>
-          <td style="padding:6px 10px;color:#777;font-size:12px;">{note}</td>
+          <td style="padding:6px 10px;color:#555;width:100px;font-size:13px;">{label}</td>
+          <td style="padding:6px 10px;font-weight:bold;color:{color};font-size:13px;">{value}</td>
+          <td style="padding:6px 10px;color:#777;font-size:11px;">{note}</td>
         </tr>"""
+
+    # 金字塔建倉區塊
+    pyramid_html = ""
+    if result["pyramid"]["suggestions"]:
+        suggestions_html = "".join(
+            f'<li style="margin:4px 0;font-size:13px;">{s}</li>'
+            for s in result["pyramid"]["suggestions"]
+        )
+        pyramid_html = f"""
+      <div style="background:#f0f8ff;padding:10px 16px;border-top:1px solid #d6eaf8;">
+        <div style="font-weight:bold;color:#2471a3;margin-bottom:4px;">
+          🏗️ 金字塔建倉建議
+        </div>
+        <ul style="margin:0;padding-left:18px;">{suggestions_html}</ul>
+      </div>"""
 
     return f"""
     <div style="margin-bottom:28px;border:2px solid {result['border']};
                 border-radius:10px;overflow:hidden;background:#fff;">
-      <!-- 股票標題列 -->
       <div style="background:{result['border']};padding:12px 16px;
                   display:flex;justify-content:space-between;align-items:center;">
         <span style="color:#fff;font-size:16px;font-weight:bold;">
           {result['emoji']} {name} ({ticker.replace('.TW','')})
         </span>
         <span style="color:#fff;font-size:20px;font-weight:bold;">
-          ${result['close']:.2f}
+          {result['close']:.2f}
         </span>
       </div>
-      <!-- 訊號摘要 -->
-      <div style="background:{result['bg']};padding:10px 16px;
-                  border-bottom:1px solid #eee;">
+      <div style="background:{result['bg']};padding:10px 16px;border-bottom:1px solid #eee;">
         <strong>{result['summary']}</strong>
         <span style="color:#555;margin-left:8px;">— {result['advice']}</span>
       </div>
-      <!-- 指標明細 -->
-      <table style="width:100%;border-collapse:collapse;">
-        {rows}
-      </table>
+      <table style="width:100%;border-collapse:collapse;">{rows}</table>
+      {pyramid_html}
     </div>"""
 
 
@@ -332,13 +451,20 @@ def stock_html_block(name: str, ticker: str, result: dict) -> str:
 def summary_table(results: list) -> str:
     rows = ""
     for name, ticker, r in results:
+        b60_badge = ""
+        if r["b60"]["zone"] == "overheated":
+            b60_badge = ' <span style="background:#c0392b;color:#fff;font-size:10px;padding:2px 6px;border-radius:4px;">🔥過熱</span>'
+        elif r["b60"]["zone"] == "oversold":
+            b60_badge = ' <span style="background:#2980b9;color:#fff;font-size:10px;padding:2px 6px;border-radius:4px;">❄️超跌</span>'
+
         rows += f"""
         <tr style="border-bottom:1px solid #eee;">
-          <td style="padding:8px 12px;">{name}</td>
+          <td style="padding:8px 12px;">{name}{b60_badge}</td>
           <td style="padding:8px 12px;color:#777;">{ticker.replace('.TW','')}</td>
           <td style="padding:8px 12px;font-weight:bold;">{r['close']:.2f}</td>
           <td style="padding:8px 12px;font-size:18px;">{r['emoji']}</td>
           <td style="padding:8px 12px;font-weight:bold;color:{r['border']};">{r['summary']}</td>
+          <td style="padding:8px 12px;color:#777;font-size:12px;">BIAS60={r['b60']['bias60']:.1f}%</td>
         </tr>"""
 
     return f"""
@@ -351,53 +477,37 @@ def summary_table(results: list) -> str:
           <th style="padding:10px 12px;text-align:left;">收盤價</th>
           <th style="padding:10px 12px;text-align:left;">訊號</th>
           <th style="padding:10px 12px;text-align:left;">說明</th>
+          <th style="padding:10px 12px;text-align:left;">季線乖離</th>
         </tr>
       </thead>
       <tbody>{rows}</tbody>
     </table>"""
 
 
-# ── 組裝完整 HTML Email ──────────────────────────────────────
+# ── 組裝 HTML Email ──────────────────────────────────────────
 def build_email_html(results: list, today: str) -> str:
-    overview  = summary_table(results)
-    details   = "".join(stock_html_block(n, t, r) for n, t, r in results)
-
-    return f"""
-<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"></head>
-<body style="font-family:Arial,sans-serif;max-width:700px;
-             margin:0 auto;padding:20px;background:#f4f6f8;">
-
-  <!-- 頁首 -->
+    overview = summary_table(results)
+    details  = "".join(stock_html_block(n, t, r) for n, t, r in results)
+    return f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head>
+<body style="font-family:Arial,sans-serif;max-width:720px;margin:0 auto;
+             padding:20px;background:#f4f6f8;">
   <div style="background:#2c3e50;color:#fff;padding:20px;
               border-radius:10px 10px 0 0;text-align:center;">
     <h2 style="margin:0;">📊 每日股市訊號報告</h2>
     <p style="margin:6px 0 0;opacity:.8;">{today}｜收盤後分析</p>
   </div>
-
   <div style="background:#fff;padding:24px;border-radius:0 0 10px 10px;
               box-shadow:0 2px 8px rgba(0,0,0,.08);">
-
-    <!-- 今日總覽 -->
-    <h3 style="color:#2c3e50;border-bottom:2px solid #2c3e50;
-               padding-bottom:6px;">今日總覽</h3>
+    <h3 style="color:#2c3e50;border-bottom:2px solid #2c3e50;padding-bottom:6px;">今日總覽</h3>
     {overview}
-
-    <!-- 各股詳細指標 -->
-    <h3 style="color:#2c3e50;border-bottom:2px solid #2c3e50;
-               padding-bottom:6px;">各股詳細指標</h3>
+    <h3 style="color:#2c3e50;border-bottom:2px solid #2c3e50;padding-bottom:6px;">各股詳細指標</h3>
     {details}
-
-    <!-- 免責聲明 -->
     <p style="color:#aaa;font-size:11px;text-align:center;
               border-top:1px solid #eee;padding-top:12px;margin-top:8px;">
-      ⚠️ 本報告由自動化程式產生，僅供參考，不構成投資建議。<br>
-      請依據個人判斷決定進出場時機。
+      ⚠️ 本報告由自動化程式產生，僅供參考，不構成投資建議。請依個人判斷決定進出場時機。
     </p>
   </div>
-</body>
-</html>"""
+</body></html>"""
 
 
 # ── 發送 Email ───────────────────────────────────────────────
@@ -406,19 +516,16 @@ def send_email(cfg: dict, html: str, today: str) -> bool:
     if not gmail_pass:
         print("⚠️  未設定 GMAIL_PASSWORD（GitHub Secret），跳過發信")
         return False
-
     ec      = cfg["email"]
     subject = ec["subject"].format(date=today)
-
-    msg = MIMEMultipart("alternative")
+    msg     = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"]    = ec["from"]
     msg["To"]      = ec["to"]
     msg.attach(MIMEText(html, "html", "utf-8"))
-
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(ec["from"], gmail_pass)
-        server.sendmail(ec["from"], ec["to"], msg.as_string())
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
+        s.login(ec["from"], gmail_pass)
+        s.sendmail(ec["from"], ec["to"], msg.as_string())
     return True
 
 
@@ -426,34 +533,32 @@ def send_email(cfg: dict, html: str, today: str) -> bool:
 def main():
     cfg   = load_config()
     today = datetime.today().strftime("%Y/%m/%d")
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] 開始分析，共 {len(cfg['watchlist'])} 檔股票")
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] 開始分析，共 {len(cfg['watchlist'])} 檔")
 
     results = []
     for stock in cfg["watchlist"]:
-        ticker = stock["ticker"]
-        name   = stock["name"]
-        print(f"  分析中：{name} ({ticker}) ...", end=" ")
+        ticker, name = stock["ticker"], stock["name"]
+        print(f"  {name} ({ticker}) ...", end=" ")
         try:
             df = fetch_data(ticker, cfg["lookback_days"])
             df = calc_indicators(df, cfg)
             r  = evaluate(df, cfg)
             results.append((name, ticker, r))
-            print(f"{r['emoji']} {r['summary']}")
+            print(f"{r['emoji']} {r['summary']} | BIAS60={r['b60']['bias60']:.1f}%")
         except Exception as e:
-            print(f"❌ 錯誤：{e}")
+            print(f"❌ {e}")
 
     if not results:
-        print("所有股票分析失敗，中止執行")
+        print("所有分析失敗，中止")
         return
 
     html = build_email_html(results, today)
-
     print(f"\n發送 Email 至 {cfg['email']['to']} ...")
     try:
         if send_email(cfg, html, today):
             print("✅ Email 發送成功")
     except Exception as e:
-        print(f"❌ Email 發送失敗：{e}")
+        print(f"❌ Email 失敗：{e}")
 
 
 if __name__ == "__main__":
