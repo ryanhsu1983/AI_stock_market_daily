@@ -3,7 +3,7 @@
 ====================
 Repository : github.com/ryanhsu1983/AI_stock_0050
 說明        : 每日台股收盤後自動執行，依三層指標架構判斷訊號強度，
-              透過 LINE Notify 推播提醒。所有參數從 config.json 讀取。
+              透過 Discord Webhook 推播提醒。所有參數從 config.json 讀取。
 """
 
 import json
@@ -215,21 +215,17 @@ def build_message(result: dict) -> str:
     return "\n".join(lines)
 
 
-# ── LINE 推播 ────────────────────────────────────────────────
-def send_line(token: str, message: str) -> bool:
-    resp = requests.post(
-        "https://notify-api.line.me/api/notify",
-        headers={"Authorization": f"Bearer {token}"},
-        data={"message": message},
-        timeout=10,
-    )
-    return resp.status_code == 200
+# ── Discord 推播 ─────────────────────────────────────────────
+def send_discord(webhook_url: str, message: str) -> bool:
+    payload = {"content": f"```\n{message[:1950]}\n```"}
+    resp = requests.post(webhook_url, json=payload, timeout=10)
+    return resp.status_code in (200, 204)
 
 
 # ── 主流程 ───────────────────────────────────────────────────
 def main():
-    cfg   = load_config()
-    token = os.environ.get("LINE_TOKEN", "")
+    cfg         = load_config()
+    webhook_url = os.environ.get("DISCORD_WEBHOOK", "")
 
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] 開始分析 {cfg['ticker']} ...")
 
@@ -251,12 +247,12 @@ def main():
     }
 
     if notify_map.get(result["level"], False):
-        if not token:
-            print("\n⚠️  未設定 LINE_TOKEN（GitHub Secret），跳過推播")
-        elif send_line(token, "\n" + msg):
-            print("\n✅ LINE 推播成功")
+        if not webhook_url:
+            print("\n⚠️  未設定 DISCORD_WEBHOOK（GitHub Secret），跳過推播")
+        elif send_discord(webhook_url, msg):
+            print("\n✅ Discord 推播成功")
         else:
-            print("\n❌ LINE 推播失敗（請確認 Token）")
+            print("\n❌ Discord 推播失敗（請確認 Webhook URL）")
     else:
         print(f"\n⚪ 訊號等級 {result['level']} 設定為不推播")
 
