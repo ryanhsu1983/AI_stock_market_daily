@@ -1,6 +1,7 @@
 {
   "watchlist": [
     {"ticker": "0050.TW",   "name": "元大台灣50"},
+    {"ticker": "00631L",   "name": "元大台灣50正二"},
     {"ticker": "2330", "name": "台積電"}
   ],
 
