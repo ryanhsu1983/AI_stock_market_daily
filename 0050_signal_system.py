@@ -87,7 +87,7 @@ return {
 
 def fetch_institutional(ticker_raw: str) -> dict:
 """
-從台灣證交所抓取三大法人當日買賣超。
+從台灣證交所抓取三大法人當日買賣超.
 回傳 dict：
 success      : bool
 foreign_net  : 外資買賣超（張）
@@ -900,7 +900,7 @@ f’<h3 style="color:#2c3e50;border-bottom:2px solid #2c3e50;padding-bottom:6px;
 f’{details}’
 f’<p style="color:#aaa;font-size:11px;text-align:center;'
 f'border-top:1px solid #eee;padding-top:12px;margin-top:8px;">’
-f’⚠️ 本報告由自動化程式產生，僅供參考，不構成投資建議。</p>’
+f’⚠️ 本報告由自動化程式產生，僅供參考，不構成投資建議.</p>’
 f’</div></body></html>’)
 
 # ══════════════════════════════════════════════════════════════
