@@ -759,20 +759,20 @@ return dict(drop_pct=drop_pct, is_consolidating=is_cons,
 def score_bar_html(buy_score, sell_score, max_score, b60_locked):
 buy_pct  = min(buy_score  / max_score * 100, 100)
 sell_pct = min(sell_score / max_score * 100, 100)
-lock_note = ’ <span style="color:#c0392b;font-size:11px;">🔥 過熱鎖定</span>’ if b60_locked else ""
+lock_note = ' <span style="color:#c0392b;font-size:11px;">🔥 過熱鎖定</span>' if b60_locked else ""
 return (
-f’<div style="padding:10px 16px;background:#f8f9fa;border-bottom:1px solid #eee;">’
-f’<div style="display:flex;gap:16px;align-items:center;">’
-f’<div style="flex:1;">’
-f’<div style="font-size:11px;color:#555;margin-bottom:3px;">買進分數:{buy_score:.0f}/{max_score}分{lock_note}</div>’
-f’<div style="background:#ddd;border-radius:4px;height:10px;">’
-f’<div style="background:{"#aaa" if b60_locked else "#2ecc71"};’
-f’width:{buy_pct:.0f}%;height:10px;border-radius:4px;"></div></div></div>’
-f’<div style="flex:1;">’
-f’<div style="font-size:11px;color:#555;margin-bottom:3px;">賣出分數:{sell_score:.0f}/{max_score}分</div>’
-f’<div style="background:#ddd;border-radius:4px;height:10px;">’
-f’<div style="background:#e74c3c;width:{sell_pct:.0f}%;height:10px;border-radius:4px;"></div>’
-f’</div></div></div></div>’
+f'<div style="padding:10px 16px;background:#f8f9fa;border-bottom:1px solid #eee;">'
+f'<div style="display:flex;gap:16px;align-items:center;">'
+f'<div style="flex:1;">'
+f'<div style="font-size:11px;color:#555;margin-bottom:3px;">買進分數:{buy_score:.0f}/{max_score}分{lock_note}</div>'
+f'<div style="background:#ddd;border-radius:4px;height:10px;">'
+f'<div style="background:{"#aaa" if b60_locked else "#2ecc71"};'
+f'width:{buy_pct:.0f}%;height:10px;border-radius:4px;"></div></div></div>'
+f'<div style="flex:1;">'
+f'<div style="font-size:11px;color:#555;margin-bottom:3px;">賣出分數:{sell_score:.0f}/{max_score}分</div>'
+f'<div style="background:#ddd;border-radius:4px;height:10px;">'
+f'<div style="background:#e74c3c;width:{sell_pct:.0f}%;height:10px;border-radius:4px;"></div>'
+f'</div></div></div></div>'
 )
 
 def stock_html_block(name: str, ticker: str, result: dict, note: str = "") -> str:
@@ -781,18 +781,18 @@ for idx, item in enumerate(result["items"]):
 label, value, color, n = item[0], item[1], item[2], item[3]
 parts = [p.strip() for p in n.split("｜") if p.strip()]
 note_items = "".join(
-f’<span style="display:block;margin:2px 0;">’
-f’<span style="color:#bbb;margin-right:4px;">{i+1}.</span>{p}</span>’
+f'<span style="display:block;margin:2px 0;">'
+f'<span style="color:#bbb;margin-right:4px;">{i+1}.</span>{p}</span>'
 for i, p in enumerate(parts))
 bg_row = "#fafafa" if idx % 2 == 0 else "#ffffff"
-rows += (f’<tr style="background:{bg_row};border-bottom:1px solid #eee;">’
-f’<td style="padding:8px 10px;color:#444;width:120px;font-size:13px;'
-f'font-weight:bold;vertical-align:top;white-space:nowrap;">{label}</td>’
-f’<td style="padding:8px 10px;font-weight:bold;color:{color};'
-f'font-size:13px;vertical-align:top;width:200px;">{value}</td>’
-f’<td style="padding:8px 10px;color:#666;font-size:12px;'
-f'line-height:1.8;vertical-align:top;">{note_items}</td>’
-f’</tr>’)
+rows += (f'<tr style="background:{bg_row};border-bottom:1px solid #eee;">'
+f'<td style="padding:8px 10px;color:#444;width:120px;font-size:13px;'
+f'font-weight:bold;vertical-align:top;white-space:nowrap;">{label}</td>'
+f'<td style="padding:8px 10px;font-weight:bold;color:{color};'
+f'font-size:13px;vertical-align:top;width:200px;">{value}</td>'
+f'<td style="padding:8px 10px;color:#666;font-size:12px;'
+f'line-height:1.8;vertical-align:top;">{note_items}</td>'
+f'</tr>')
 
 ```
 note_html = (f'<div style="background:#fef9e7;padding:8px 16px;'
@@ -835,31 +835,31 @@ rows = ""
 for name, ticker, r in results:
 badge = ""
 if r["b60"]["zone"] == "overheated":
-badge = (’ <span style="background:#c0392b;color:#fff;font-size:10px;'
-'padding:2px 6px;border-radius:4px;">🔥過熱</span>’)
+badge = (' <span style="background:#c0392b;color:#fff;font-size:10px;'
+'padding:2px 6px;border-radius:4px;">🔥過熱</span>')
 elif r["b60"]["zone"] == "oversold":
-badge = (’ <span style="background:#2980b9;color:#fff;font-size:10px;'
-'padding:2px 6px;border-radius:4px;">❄️超跌</span>’)
-rows += (f’<tr style="border-bottom:1px solid #eee;">’
-f’<td style="padding:8px 12px;">{name}{badge}</td>’
-f’<td style="padding:8px 12px;color:#777;">’
-f’{ticker.replace(".TW","").replace(".tw","")}</td>’
-f’<td style="padding:8px 12px;font-weight:bold;">{r["close"]:.2f}</td>’
-f’<td style="padding:8px 12px;font-size:16px;">{r["emoji"]}</td>’
-f’<td style="padding:8px 12px;font-weight:bold;color:{r["border"]};">{r["summary"]}</td>’
-f’<td style="padding:8px 12px;font-size:12px;color:#777;">’
-f’買{r["buy_score"]:.0f}/賣{r["sell_score"]:.0f}(滿分{r["max_possible"]})</td>’
-f’</tr>’)
-return (f’<table style="width:100%;border-collapse:collapse;margin-bottom:28px;'
-f'border:1px solid #ddd;border-radius:8px;overflow:hidden;">’
-f’<thead><tr style="background:#2c3e50;color:#fff;">’
-f’<th style="padding:10px 12px;text-align:left;">股票名稱</th>’
-f’<th style="padding:10px 12px;text-align:left;">代號</th>’
-f’<th style="padding:10px 12px;text-align:left;">收盤價</th>’
-f’<th style="padding:10px 12px;text-align:left;">訊號</th>’
-f’<th style="padding:10px 12px;text-align:left;">說明</th>’
-f’<th style="padding:10px 12px;text-align:left;">分數</th>’
-f’</tr></thead><tbody>{rows}</tbody></table>’)
+badge = (' <span style="background:#2980b9;color:#fff;font-size:10px;'
+'padding:2px 6px;border-radius:4px;">❄️超跌</span>')
+rows += (f'<tr style="border-bottom:1px solid #eee;">'
+f'<td style="padding:8px 12px;">{name}{badge}</td>'
+f'<td style="padding:8px 12px;color:#777;">'
+f'{ticker.replace(".TW","").replace(".tw","")}</td>'
+f'<td style="padding:8px 12px;font-weight:bold;">{r["close"]:.2f}</td>'
+f'<td style="padding:8px 12px;font-size:16px;">{r["emoji"]}</td>'
+f'<td style="padding:8px 12px;font-weight:bold;color:{r["border"]};">{r["summary"]}</td>'
+f'<td style="padding:8px 12px;font-size:12px;color:#777;">'
+f'買{r["buy_score"]:.0f}/賣{r["sell_score"]:.0f}(滿分{r["max_possible"]})</td>'
+f'</tr>')
+return (f'<table style="width:100%;border-collapse:collapse;margin-bottom:28px;'
+f'border:1px solid #ddd;border-radius:8px;overflow:hidden;">'
+f'<thead><tr style="background:#2c3e50;color:#fff;">'
+f'<th style="padding:10px 12px;text-align:left;">股票名稱</th>'
+f'<th style="padding:10px 12px;text-align:left;">代號</th>'
+f'<th style="padding:10px 12px;text-align:left;">收盤價</th>'
+f'<th style="padding:10px 12px;text-align:left;">訊號</th>'
+f'<th style="padding:10px 12px;text-align:left;">說明</th>'
+f'<th style="padding:10px 12px;text-align:left;">分數</th>'
+f'</tr></thead><tbody>{rows}</tbody></table>')
 
 def build_email_html(results: list, today: str) -> str:
 overview = summary_table(results)
@@ -867,31 +867,31 @@ details  = "".join(
 stock_html_block(n, t, r, note=r.get("stock_note", ""))
 for n, t, r in results)
 weights_note = (
-f’趨勢環境{WEIGHTS["trend"]}分｜MACD {WEIGHTS["macd"]}分｜’
-f’三大法人{WEIGHTS["institutional"]}分｜KD {WEIGHTS["kd"]}分｜’
-f’OBV {WEIGHTS["obv"]}分｜乖離率{WEIGHTS["bias20"]}分｜’
-f’量能{WEIGHTS["vol"]}分｜總分100分｜’
-f’強訊號≥70｜中訊號50-69｜弱訊號30-49｜提醒15-29’)
+f'趨勢環境{WEIGHTS["trend"]}分｜MACD {WEIGHTS["macd"]}分｜'
+f'三大法人{WEIGHTS["institutional"]}分｜KD {WEIGHTS["kd"]}分｜'
+f'OBV {WEIGHTS["obv"]}分｜乖離率{WEIGHTS["bias20"]}分｜'
+f'量能{WEIGHTS["vol"]}分｜總分100分｜'
+f'強訊號≥70｜中訊號50-69｜弱訊號30-49｜提醒15-29')
 return (
-f’<!DOCTYPE html><html><head><meta charset="utf-8"></head>’
-f’<body style="font-family:Arial,sans-serif;max-width:760px;margin:0 auto;'
-f'padding:20px;background:#f4f6f8;">’
-f’<div style="background:#2c3e50;color:#fff;padding:20px;'
-f'border-radius:10px 10px 0 0;text-align:center;">’
-f’<h2 style="margin:0;">📊 每日股市訊號報告</h2>’
-f’<p style="margin:6px 0 0;opacity:.8;">{today}｜收盤後分析</p></div>’
-f’<div style="background:#fff;padding:24px;border-radius:0 0 10px 10px;'
-f'box-shadow:0 2px 8px rgba(0,0,0,.08);">’
-f’<div style="background:#eaf4fb;padding:8px 14px;border-radius:6px;'
-f'font-size:11px;color:#2471a3;margin-bottom:16px;">ℹ️ 評分權重:{weights_note}</div>’
-f’<h3 style="color:#2c3e50;border-bottom:2px solid #2c3e50;padding-bottom:6px;">今日總覽</h3>’
-f’{overview}’
-f’<h3 style="color:#2c3e50;border-bottom:2px solid #2c3e50;padding-bottom:6px;">各股詳細指標</h3>’
-f’{details}’
-f’<p style="color:#aaa;font-size:11px;text-align:center;'
-f'border-top:1px solid #eee;padding-top:12px;margin-top:8px;">’
-f’⚠️ 本報告由自動化程式產生，僅供參考，不構成投資建議.</p>’
-f’</div></body></html>’)
+f'<!DOCTYPE html><html><head><meta charset="utf-8"></head>'
+f'<body style="font-family:Arial,sans-serif;max-width:760px;margin:0 auto;'
+f'padding:20px;background:#f4f6f8;">'
+f'<div style="background:#2c3e50;color:#fff;padding:20px;'
+f'border-radius:10px 10px 0 0;text-align:center;">'
+f'<h2 style="margin:0;">📊 每日股市訊號報告</h2>'
+f'<p style="margin:6px 0 0;opacity:.8;">{today}｜收盤後分析</p></div>'
+f'<div style="background:#fff;padding:24px;border-radius:0 0 10px 10px;'
+f'box-shadow:0 2px 8px rgba(0,0,0,.08);">'
+f'<div style="background:#eaf4fb;padding:8px 14px;border-radius:6px;'
+f'font-size:11px;color:#2471a3;margin-bottom:16px;">ℹ️ 評分權重:{weights_note}</div>'
+f'<h3 style="color:#2c3e50;border-bottom:2px solid #2c3e50;padding-bottom:6px;">今日總覽</h3>'
+f'{overview}'
+f'<h3 style="color:#2c3e50;border-bottom:2px solid #2c3e50;padding-bottom:6px;">各股詳細指標</h3>'
+f'{details}'
+f'<p style="color:#aaa;font-size:11px;text-align:center;'
+f'border-top:1px solid #eee;padding-top:12px;margin-top:8px;">'
+f'⚠️ 本報告由自動化程式產生，僅供參考，不構成投資建議.</p>'
+f'</div></body></html>')
 
 # ══════════════════════════════════════════════════════════════
 
@@ -924,7 +924,7 @@ return True
 def main():
 cfg   = load_config()
 today = datetime.today().strftime("%Y/%m/%d")
-print(f"[{datetime.now().strftime(’%Y-%m-%d %H:%M’)}] 開始分析，共 {len(cfg[‘watchlist’])} 檔")
+print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] 開始分析，共 {len(cfg[‘watchlist'])} 檔")
 
 ```
 # 三大法人資料只抓一次(所有股票共用同一份當日資料)
