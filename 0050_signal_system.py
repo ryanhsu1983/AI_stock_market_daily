@@ -37,14 +37,12 @@ SIGNAL_LEVELS = [
 ]
 
 # ══════════════════════════════════════════════════════════════
-
 # 設定載入
-
 # ══════════════════════════════════════════════════════════════
 
 def load_config() -> dict:
-with open(Path(**file**).parent / "config.json", "r", encoding="utf-8") as f:
-return json.load(f)
+    with open(Path(__file__).parent / "config.json", "r", encoding="utf-8") as f:
+        return json.load(f)
 
 def get_stock_cfg(stock: dict, global_cfg: dict) -> dict:
 ov  = stock.get("overrides", {})
