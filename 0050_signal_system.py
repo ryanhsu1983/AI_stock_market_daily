@@ -1,14 +1,5 @@
 # Daily Stock Signal System v5
 
-Repository: github.com/ryanhsu1983/AI_stock_0050
-v5 updates:
-
-- 100-point weighted scoring system
-- 4-level signals (notice/weak/mid/strong)
-- TWSE institutional investors crawler with validation
-- Independent buy/sell scoring
-
-
 import json, os, smtplib, time, requests
 import yfinance as yf
 import pandas as pd
