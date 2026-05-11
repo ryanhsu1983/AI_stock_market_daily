@@ -88,7 +88,7 @@ return {
 def fetch_institutional(ticker_raw: str) -> dict:
 """
 從台灣證交所抓取三大法人當日買賣超.
-回傳 dict：
+回傳 dict:
 success      : bool
 foreign_net  : 外資買賣超（張）
 invest_net   : 投信買賣超（張）
@@ -117,7 +117,7 @@ try:
 
     # ── 格式驗證 ──────────────────────────────────────────
     if data.get("stat") != "OK":
-        return {"success": False, "error": f"證交所回傳狀態非OK：{data.get('stat')}"}
+        return {"success": False, "error": f"證交所回傳狀態非OK:{data.get('stat')}"}
 
     fields = data.get("fields", [])
     rows   = data.get("data",   [])
@@ -126,7 +126,7 @@ try:
     for f in required_fields:
         if f not in fields:
             return {"success": False,
-                    "error": f"欄位格式異動，缺少：{f}｜目前欄位：{fields[:6]}"}
+                    "error": f"欄位格式異動，缺少:{f}｜目前欄位:{fields[:6]}"}
 
     if not rows:
         return {"success": False, "error": "今日無三大法人資料（可能為非交易日）"}
@@ -158,7 +158,7 @@ try:
     dealer  = parse_num(target_row[idx_dealer])
     total   = foreign + invest + dealer
 
-    # 單位轉換：股 → 張（1張=1000股）
+    # 單位轉換:股 → 張（1張=1000股）
     return {
         "success":     True,
         "foreign_net": foreign // 1000,
@@ -173,7 +173,7 @@ except requests.exceptions.Timeout:
 except requests.exceptions.ConnectionError:
     return {"success": False, "error": "無法連線至證交所，請確認網路"}
 except Exception as e:
-    return {"success": False, "error": f"未預期錯誤：{str(e)[:80]}"}
+    return {"success": False, "error": f"未預期錯誤:{str(e)[:80]}"}
 ```
 
 # ══════════════════════════════════════════════════════════════
@@ -432,7 +432,7 @@ total_buy  += macd_buy
 total_sell += macd_sell
 items.append(("MACD", macd_val, macd_col,
               f"當前柱狀值={hist:.4f}｜"
-              f"歷史正常區間：{hist_p10:.4f}～{hist_p90:.4f}｜"
+              f"歷史正常區間:{hist_p10:.4f}～{hist_p90:.4f}｜"
               f"翻轉時滿分{w}分｜持續同向{w*0.3:.0f}分｜"
               f"正=多頭動能｜負=空頭動能｜由負翻正為最強買進訊號",
               macd_buy, macd_sell))
@@ -451,7 +451,7 @@ elif not inst.get("success", False):
     inst_val  = f"⚠️ 資料異常"
     inst_col  = "#f39c12"
     inst_detail = (f"三大法人資料今日無法取得，已略過不計分｜"
-                   f"原因：{inst.get('error', '未知')}｜"
+                   f"原因:{inst.get('error', '未知')}｜"
                    f"其他指標不受影響")
 else:
     total_net   = inst.get("total_net",   0)
@@ -519,8 +519,8 @@ total_buy  += kd_buy_s
 total_sell += kd_sell_s
 items.append(("KD", kd_val, kd_col,
               f"當前 K={k:.1f}｜D={d:.1f}｜"
-              f"買進區門檻：K<{thr['kd_buy']}且K上穿D=滿分{w}分｜"
-              f"賣出區門檻：K>{thr['kd_sell']}且K下穿D=滿分{w}分｜"
+              f"買進區門檻:K<{thr['kd_buy']}且K上穿D=滿分{w}分｜"
+              f"賣出區門檻:K>{thr['kd_sell']}且K下穿D=滿分{w}分｜"
               f"在買賣區間內但尚未交叉={w*0.3:.0f}分｜"
               f"正常區間（{thr['kd_buy']}～{thr['kd_sell']}）=0分",
               kd_buy_s, kd_sell_s))
@@ -584,7 +584,7 @@ total_buy  += b20_buy_s
 total_sell += b20_sell_s
 items.append((f"乖離率(MA{m})", b20_val, b20_col,
               f"當前={bias20:.2f}%（收盤偏離MA{m}的幅度）｜"
-              f"正常區間：{b20_buy}%～+{b20_sell}%｜"
+              f"正常區間:{b20_buy}%～+{b20_sell}%｜"
               f"低於{b20_buy}%=跌深買進區（{w}分）｜"
               f"高於+{b20_sell}%=漲多賣出區（{w}分）｜"
               f"在正常範圍內=0分",
@@ -607,7 +607,7 @@ if use_vol:
         vol_val, vol_col = "量能平穩（0分）", "#95a5a6"
 
     vol_detail = (f"今日成交量／{thr['vol_ma_period']}日均量={vol_ratio:.2f}倍｜"
-                  f"正常範圍：0.8～1.2倍｜"
+                  f"正常範圍:0.8～1.2倍｜"
                   f"量能擴張且價漲={w}分｜量能萎縮={w*0.5:.0f}分賣出｜"
                   f"量能為輔助指標，單獨參考價值較低")
 else:
@@ -626,14 +626,14 @@ items.append(("價格行為",
               f"{'紅K' if is_red else '黑K'}（{chg_pct:+.2f}%）（參考）",
               "#2ecc71" if is_red else "#e74c3c",
               f"開盤={open_p:.2f}｜收盤={close:.2f}｜當日漲跌={chg_pct:+.2f}%｜"
-              f"紅K：收盤>開盤，買方強勢｜黑K：收盤<開盤，賣方強勢｜"
-              f"長上影線：上漲被壓回，賣壓重｜長下影線：下跌被撐回，買盤強｜"
+              f"紅K:收盤>開盤，買方強勢｜黑K:收盤<開盤，賣方強勢｜"
+              f"長上影線:上漲被壓回，賣壓重｜長下影線:下跌被撐回，買盤強｜"
               f"此指標僅供參考，不計入總分",
               0, 0))
 
 # ── 綜合訊號判斷 ──────────────────────────────────────────
 
-# BIAS60過熱鎖定：買進分數強制歸零
+# BIAS60過熱鎖定:買進分數強制歸零
 if b60["locked"]:
     effective_buy  = 0
     effective_sell = total_sell
@@ -746,13 +746,13 @@ suggs     = []
 if "BUY_" in level:
     batches = int(abs(drop_pct) / drop_step) if drop_pct < 0 else 0
     if batches == 0:
-        suggs.append(f"📌 第1批建倉：建議投入可用資金 <b>{add_ratio:.0f}%</b>（首批試單）")
+        suggs.append(f"📌 第1批建倉:建議投入可用資金 <b>{add_ratio:.0f}%</b>（首批試單）")
     else:
-        suggs.append(f"📌 第{batches+1}批加碼：距高點回落 {abs(drop_pct):.1f}%，"
+        suggs.append(f"📌 第{batches+1}批加碼:距高點回落 {abs(drop_pct):.1f}%，"
                      f"建議再投入剩餘資金 <b>{add_ratio:.0f}%</b>")
         suggs.append(f"　　累計已達 {batches} 次加碼條件（每跌 {drop_step:.0f}% 加一批）")
     if is_cons:
-        suggs.append(f"⏱️ 時間補位提醒：近 {time_days} 日盤整幅度僅 {range_pct:.1f}%，"
+        suggs.append(f"⏱️ 時間補位提醒:近 {time_days} 日盤整幅度僅 {range_pct:.1f}%，"
                      f"可考慮投入剩餘資金 <b>{time_ratio:.0f}%</b> 進行時間性補位")
 
 return dict(drop_pct=drop_pct, is_consolidating=is_cons,
@@ -774,12 +774,12 @@ return (
 f’<div style="padding:10px 16px;background:#f8f9fa;border-bottom:1px solid #eee;">’
 f’<div style="display:flex;gap:16px;align-items:center;">’
 f’<div style="flex:1;">’
-f’<div style="font-size:11px;color:#555;margin-bottom:3px;">買進分數：{buy_score:.0f}/{max_score}分{lock_note}</div>’
+f’<div style="font-size:11px;color:#555;margin-bottom:3px;">買進分數:{buy_score:.0f}/{max_score}分{lock_note}</div>’
 f’<div style="background:#ddd;border-radius:4px;height:10px;">’
 f’<div style="background:{"#aaa" if b60_locked else "#2ecc71"};’
 f’width:{buy_pct:.0f}%;height:10px;border-radius:4px;"></div></div></div>’
 f’<div style="flex:1;">’
-f’<div style="font-size:11px;color:#555;margin-bottom:3px;">賣出分數：{sell_score:.0f}/{max_score}分</div>’
+f’<div style="font-size:11px;color:#555;margin-bottom:3px;">賣出分數:{sell_score:.0f}/{max_score}分</div>’
 f’<div style="background:#ddd;border-radius:4px;height:10px;">’
 f’<div style="background:#e74c3c;width:{sell_pct:.0f}%;height:10px;border-radius:4px;"></div>’
 f’</div></div></div></div>’
@@ -893,7 +893,7 @@ f’<p style="margin:6px 0 0;opacity:.8;">{today}｜收盤後分析</p></div>’
 f’<div style="background:#fff;padding:24px;border-radius:0 0 10px 10px;'
 f'box-shadow:0 2px 8px rgba(0,0,0,.08);">’
 f’<div style="background:#eaf4fb;padding:8px 14px;border-radius:6px;'
-f'font-size:11px;color:#2471a3;margin-bottom:16px;">ℹ️ 評分權重：{weights_note}</div>’
+f'font-size:11px;color:#2471a3;margin-bottom:16px;">ℹ️ 評分權重:{weights_note}</div>’
 f’<h3 style="color:#2c3e50;border-bottom:2px solid #2c3e50;padding-bottom:6px;">今日總覽</h3>’
 f’{overview}’
 f’<h3 style="color:#2c3e50;border-bottom:2px solid #2c3e50;padding-bottom:6px;">各股詳細指標</h3>’
@@ -982,7 +982,7 @@ try:
     if send_email(cfg, html, today):
         print("✅ Email 發送成功")
 except Exception as e:
-    print(f"❌ Email 失敗：{e}")
+    print(f"❌ Email 失敗:{e}")
 ```
 
 if **name** == "**main**":
