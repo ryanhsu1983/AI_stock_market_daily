@@ -5,14 +5,11 @@
       "name": "元大台灣50",
       "note": "大型ETF，波動低，均值回歸強，所有指標適用",
       "overrides": {
-        "kd_buy": 30,
-        "kd_sell": 70,
-        "bias20_buy": -4.0,
-        "bias20_sell": 5.0,
-        "bias60_p_low": 5,
-        "bias60_p_high": 95,
-        "use_obv": true,
-        "use_vol_trend": true,
+        "kd_buy": 30, "kd_sell": 70,
+        "bias20_buy": -4.0, "bias20_sell": 5.0,
+        "bias60_p_low": 5, "bias60_p_high": 95,
+        "use_obv": true, "use_vol_trend": true,
+        "use_institutional": true,
         "leverage_warning": false,
         "ma_periods": {"short": 10, "mid": 20, "long": 60}
       }
@@ -22,15 +19,13 @@
       "name": "元大台灣50正二",
       "note": "2倍槓桿ETF，每日重置有長期耗損，僅適合短線波段，不適合長抱",
       "overrides": {
-        "kd_buy": 20,
-        "kd_sell": 80,
-        "bias20_buy": -8.0,
-        "bias20_sell": 10.0,
-        "bias60_p_low": 10,
-        "bias60_p_high": 90,
-        "use_obv": false,
-        "use_vol_trend": false,
+        "kd_buy": 20, "kd_sell": 80,
+        "bias20_buy": -8.0, "bias20_sell": 10.0,
+        "bias60_p_low": 10, "bias60_p_high": 90,
+        "use_obv": false, "use_vol_trend": false,
+        "use_institutional": false,
         "leverage_warning": true,
+        "bias60_locked": false,
         "ma_periods": {"short": 5, "mid": 10, "long": 20}
       }
     },
@@ -39,14 +34,11 @@
       "name": "台積電",
       "note": "大型權值股，受外資ADR影響大，個股波動高於ETF",
       "overrides": {
-        "kd_buy": 30,
-        "kd_sell": 70,
-        "bias20_buy": -8.0,
-        "bias20_sell": 12.0,
-        "bias60_p_low": 5,
-        "bias60_p_high": 95,
-        "use_obv": true,
-        "use_vol_trend": true,
+        "kd_buy": 30, "kd_sell": 70,
+        "bias20_buy": -8.0, "bias20_sell": 12.0,
+        "bias60_p_low": 5, "bias60_p_high": 95,
+        "use_obv": true, "use_vol_trend": true,
+        "use_institutional": true,
         "leverage_warning": false,
         "ma_periods": {"short": 10, "mid": 20, "long": 60}
       }
@@ -56,14 +48,11 @@
       "name": "聯發科",
       "note": "景氣循環股，波動較台積電更大，乖離門檻需更寬",
       "overrides": {
-        "kd_buy": 30,
-        "kd_sell": 70,
-        "bias20_buy": -10.0,
-        "bias20_sell": 15.0,
-        "bias60_p_low": 5,
-        "bias60_p_high": 95,
-        "use_obv": true,
-        "use_vol_trend": true,
+        "kd_buy": 30, "kd_sell": 70,
+        "bias20_buy": -10.0, "bias20_sell": 15.0,
+        "bias60_p_low": 5, "bias60_p_high": 95,
+        "use_obv": true, "use_vol_trend": true,
+        "use_institutional": true,
         "leverage_warning": false,
         "ma_periods": {"short": 10, "mid": 20, "long": 60}
       }
@@ -73,32 +62,24 @@
   "lookback_days": 600,
 
   "thresholds": {
-    "kd_buy":        30,
-    "kd_sell":       70,
-    "bias20_buy":    -4.0,
-    "bias20_sell":    5.0,
-    "bias60_p_low":   5,
-    "bias60_p_high": 95,
-    "vol_ma_period": 10,
-    "obv_ma_period": 10
+    "kd_buy": 30, "kd_sell": 70,
+    "bias20_buy": -4.0, "bias20_sell": 5.0,
+    "bias60_p_low": 5, "bias60_p_high": 95,
+    "vol_ma_period": 10, "obv_ma_period": 10
   },
 
-  "ma_periods": {
-    "short": 10,
-    "mid":   20,
-    "long":  60
-  },
+  "ma_periods": {"short": 10, "mid": 20, "long": 60},
 
   "pyramid": {
-    "add_per_drop_pct":    5.0,
-    "add_ratio_pct":      20.0,
+    "add_per_drop_pct": 5.0,
+    "add_ratio_pct": 20.0,
     "time_rebalance_days": 20,
-    "time_add_ratio_pct":   5.0
+    "time_add_ratio_pct": 5.0
   },
 
   "email": {
-    "to":      "zergva@gmail.com",
-    "from":    "zergva@gmail.com",
+    "to": "zergva@gmail.com",
+    "from": "zergva@gmail.com",
     "subject": "【每日股市訊號報告】{date}"
   }
 }
