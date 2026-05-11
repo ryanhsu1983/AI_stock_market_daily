@@ -1,13 +1,13 @@
 # “””
-每日股市訊號系統 v5
+Daily Stock Signal System v5
 
-Repository : github.com/ryanhsu1983/AI_stock_0050
-v5 新增：
+Repository: github.com/ryanhsu1983/AI_stock_0050
+v5 updates:
 
-- 100分制加權評分系統
-- 四級訊號（提醒/弱/中/強）
-- 三大法人爬蟲（含格式驗證保護）
-- 買進/賣出分數各自獨立計算
+- 100-point weighted scoring system
+- 4-level signals (notice/weak/mid/strong)
+- TWSE institutional investors crawler with validation
+- Independent buy/sell scoring
   “””
 
 import json, os, smtplib, time, requests
