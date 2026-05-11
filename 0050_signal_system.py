@@ -20,12 +20,12 @@ from pathlib import Path
 
 # ══════════════════════════════════════════════════════════════
 
-# 權重定義（買進權重 / 賣出權重）
+# 權重定義(買進權重 / 賣出權重)
 
 # ══════════════════════════════════════════════════════════════
 
 WEIGHTS = {
-"trend":       25,   # 趨勢環境（均線排列）
+"trend":       25,   # 趨勢環境(均線排列)
 "macd":        20,   # MACD 動能轉折
 "institutional": 15, # 三大法人買賣超
 "kd":          15,   # KD 交叉
@@ -90,13 +90,13 @@ def fetch_institutional(ticker_raw: str) -> dict:
 從台灣證交所抓取三大法人當日買賣超.
 回傳 dict:
 success      : bool
-foreign_net  : 外資買賣超（張）
-invest_net   : 投信買賣超（張）
-dealer_net   : 自營商買賣超（張）
-total_net    : 三大合計（張）
-error        : 錯誤訊息（success=False 時）
+foreign_net  : 外資買賣超(張)
+invest_net   : 投信買賣超(張)
+dealer_net   : 自營商買賣超(張)
+total_net    : 三大合計(張)
+error        : 錯誤訊息(success=False 時)
 """
-# 標準化股票代號（去掉 .TW）
+# 標準化股票代號(去掉 .TW)
 stock_id = ticker_raw.upper().replace(".TW", "").replace(".TWO", "")
 
 ```
@@ -129,7 +129,7 @@ try:
                     "error": f"欄位格式異動，缺少:{f}｜目前欄位:{fields[:6]}"}
 
     if not rows:
-        return {"success": False, "error": "今日無三大法人資料（可能為非交易日）"}
+        return {"success": False, "error": "今日無三大法人資料(可能為非交易日)"}
 
     # ── 找目標股票 ────────────────────────────────────────
     idx_id      = fields.index("證券代號")
@@ -145,7 +145,7 @@ try:
 
     if target_row is None:
         return {"success": False,
-                "error": f"資料中找不到 {stock_id}（可能為ETF或上櫃股票，需另外查詢）"}
+                "error": f"資料中找不到 {stock_id}(可能為ETF或上櫃股票，需另外查詢)"}
 
     def parse_num(s):
         try:
@@ -158,7 +158,7 @@ try:
     dealer  = parse_num(target_row[idx_dealer])
     total   = foreign + invest + dealer
 
-    # 單位轉換:股 → 張（1張=1000股）
+    # 單位轉換:股 → 張(1張=1000股)
     return {
         "success":     True,
         "foreign_net": foreign // 1000,
@@ -169,7 +169,7 @@ try:
     }
 
 except requests.exceptions.Timeout:
-    return {"success": False, "error": "證交所請求逾時（15秒）"}
+    return {"success": False, "error": "證交所請求逾時(15秒)"}
 except requests.exceptions.ConnectionError:
     return {"success": False, "error": "無法連線至證交所，請確認網路"}
 except Exception as e:
@@ -269,23 +269,23 @@ can_lock = scfg.get("bias60_locked", True)
 ```
 if bias60 >= p_high:
     zone, locked = "overheated", can_lock
-    label = f"🔥 過熱{'鎖定' if can_lock else '警示'}（季線乖離{bias60:.1f}%，歷史{ph_pct}%分位）"
+    label = f"🔥 過熱{'鎖定' if can_lock else '警示'}(季線乖離{bias60:.1f}%，歷史{ph_pct}%分位)"
     color = "#c0392b"
     note  = (f"當前季線乖離={bias60:.1f}%｜"
              f"歷史{ph_pct}%分位門檻={p_high:.1f}%｜"
-             f"Z-Score={z:.2f}（>2代表極端過熱）｜"
-             f"{'強制禁止買進，等待回落後再評估' if can_lock else '僅警示，不鎖定（槓桿ETF特殊處理）'}")
+             f"Z-Score={z:.2f}(>2代表極端過熱)｜"
+             f"{'強制禁止買進，等待回落後再評估' if can_lock else '僅警示，不鎖定(槓桿ETF特殊處理)'}")
 elif bias60 <= p_low:
     zone, locked = "oversold", False
-    label = f"❄️ 超跌部署區（季線乖離{bias60:.1f}%，歷史{pl_pct}%分位）"
+    label = f"❄️ 超跌部署區(季線乖離{bias60:.1f}%，歷史{pl_pct}%分位)"
     color = "#2980b9"
     note  = (f"當前季線乖離={bias60:.1f}%｜"
              f"歷史{pl_pct}%分位門檻={p_low:.1f}%｜"
-             f"Z-Score={z:.2f}（<-2代表極端超跌）｜"
+             f"Z-Score={z:.2f}(<-2代表極端超跌)｜"
              f"統計黃金建倉區，搭配技術面確認後可積極布局")
 else:
     zone, locked = "normal", False
-    label = f"正常範圍（季線乖離{bias60:.1f}%）"
+    label = f"正常範圍(季線乖離{bias60:.1f}%)"
     color = "#95a5a6"
     note  = (f"當前季線乖離={bias60:.1f}%｜"
              f"正常區間={p_low:.1f}%～{p_high:.1f}%｜"
@@ -362,11 +362,11 @@ if lev_warn:
                   "僅適合趨勢明確時短線波段操作｜"
                   "趨勢不明時請勿持有", 0, 0))
 
-# ── BIAS60 Z-Score（不計分，但可鎖定）────────────────────
+# ── BIAS60 Z-Score(不計分，但可鎖定)────────────────────
 b60 = eval_bias60(df, scfg)
 items.append(("BIAS60 Z-Score", b60["label"], b60["color"], b60["note"], 0, 0))
 
-# ── 1. 趨勢環境（權重25）─────────────────────────────────
+# ── 1. 趨勢環境(權重25)─────────────────────────────────
 w = WEIGHTS["trend"]
 ma_s_dir   = ma_s > ma_s_prev
 above_ma_s = close > ma_s
@@ -392,17 +392,17 @@ trend_color = {"healthy_bull":"#2ecc71","weak_bull":"#f39c12",
                "bear":"#e74c3c","neutral":"#95a5a6"}[trend]
 total_buy  += buy_s
 total_sell += sell_s
-items.append(("趨勢環境", f"{trend_label}（+{buy_s:.0f}分）" if buy_s > 0
-              else f"{trend_label}（+{sell_s:.0f}分賣）" if sell_s > 0
+items.append(("趨勢環境", f"{trend_label}(+{buy_s:.0f}分)" if buy_s > 0
+              else f"{trend_label}(+{sell_s:.0f}分賣)" if sell_s > 0
               else trend_label,
               trend_color,
               f"MA{s}={ma_s:.1f}｜MA{m}={ma_m:.1f}｜MA{l}={ma_l:.1f}｜"
-              f"收盤{'站上' if above_ma_s else '跌破'}{s}日線（{s}日線{'向上' if ma_s_dir else '向下'}）｜"
-              f"多頭健康=滿分{w}分｜多頭轉弱={w*0.3:.0f}分｜空頭={w}分（賣出）｜"
+              f"收盤{'站上' if above_ma_s else '跌破'}{s}日線({s}日線{'向上' if ma_s_dir else '向下'})｜"
+              f"多頭健康=滿分{w}分｜多頭轉弱={w*0.3:.0f}分｜空頭={w}分(賣出)｜"
               f"{'⚡ 均線剛發生交叉！' if ma_bull_cross or ma_bear_cross else ''}",
               buy_s, sell_s))
 
-# ── 2. MACD（權重20）─────────────────────────────────────
+# ── 2. MACD(權重20)─────────────────────────────────────
 w = WEIGHTS["macd"]
 hist_series = df["MACD_hist"].dropna()
 hist_p10    = float(hist_series.quantile(0.10))
@@ -410,19 +410,19 @@ hist_p90    = float(hist_series.quantile(0.90))
 
 if hist > 0 and hist_p <= 0:
     macd_buy, macd_sell = w, 0
-    macd_val = f"柱狀由負翻正 ✅（+{w}分）"
+    macd_val = f"柱狀由負翻正 ✅(+{w}分)"
     macd_col = "#2ecc71"
 elif hist < 0 and hist_p >= 0:
     macd_buy, macd_sell = 0, w
-    macd_val = f"柱狀由正翻負 ⚠️（+{w}分賣）"
+    macd_val = f"柱狀由正翻負 ⚠️(+{w}分賣)"
     macd_col = "#e74c3c"
 elif hist > 0:
     macd_buy, macd_sell = w * 0.3, 0
-    macd_val = f"柱狀持續為正（+{w*0.3:.0f}分）"
+    macd_val = f"柱狀持續為正(+{w*0.3:.0f}分)"
     macd_col = "#95a5a6"
 elif hist < 0:
     macd_buy, macd_sell = 0, w * 0.3
-    macd_val = f"柱狀持續為負（+{w*0.3:.0f}分賣）"
+    macd_val = f"柱狀持續為負(+{w*0.3:.0f}分賣)"
     macd_col = "#95a5a6"
 else:
     macd_buy, macd_sell = 0, 0
@@ -437,12 +437,12 @@ items.append(("MACD", macd_val, macd_col,
               f"正=多頭動能｜負=空頭動能｜由負翻正為最強買進訊號",
               macd_buy, macd_sell))
 
-# ── 3. 三大法人（權重15）─────────────────────────────────
+# ── 3. 三大法人(權重15)─────────────────────────────────
 w = WEIGHTS["institutional"]
 inst_buy = inst_sell = 0
 
 if not use_inst:
-    inst_note = "已關閉（槓桿ETF不適用）"
+    inst_note = "已關閉(槓桿ETF不適用)"
     inst_val  = "已關閉"
     inst_col  = "#bdc3c7"
     inst_detail = "槓桿ETF成交量結構特殊，三大法人數據不具代表性"
@@ -460,22 +460,22 @@ else:
     dealer_net  = inst.get("dealer_net",  0)
 
     if total_net > 0:
-        # 依買超規模給分（超過500張給滿分，100-500張給半分）
+        # 依買超規模給分(超過500張給滿分，100-500張給半分)
         if abs(total_net) >= 500:
             inst_buy, inst_sell = w, 0
         else:
             inst_buy, inst_sell = w * 0.5, 0
-        inst_val = f"三大法人買超 {total_net:+,}張 ✅（+{inst_buy:.0f}分）"
+        inst_val = f"三大法人買超 {total_net:+,}張 ✅(+{inst_buy:.0f}分)"
         inst_col = "#2ecc71"
     elif total_net < 0:
         if abs(total_net) >= 500:
             inst_buy, inst_sell = 0, w
         else:
             inst_buy, inst_sell = 0, w * 0.5
-        inst_val = f"三大法人賣超 {total_net:+,}張 ⚠️（+{inst_sell:.0f}分賣）"
+        inst_val = f"三大法人賣超 {total_net:+,}張 ⚠️(+{inst_sell:.0f}分賣)"
         inst_col = "#e74c3c"
     else:
-        inst_val = "三大法人中立（0分）"
+        inst_val = "三大法人中立(0分)"
         inst_col = "#95a5a6"
 
     inst_detail = (f"外資={foreign_net:+,}張｜"
@@ -489,30 +489,30 @@ total_buy  += inst_buy
 total_sell += inst_sell
 items.append(("三大法人", inst_val, inst_col, inst_detail, inst_buy, inst_sell))
 
-# ── 4. KD（權重15）───────────────────────────────────────
+# ── 4. KD(權重15)───────────────────────────────────────
 w = WEIGHTS["kd"]
 kd_buy_signal  = k > d and kp <= dp and k < thr["kd_buy"]
 kd_sell_signal = k < d and kp >= dp and k > thr["kd_sell"]
 
 if kd_buy_signal:
     kd_buy_s, kd_sell_s = w, 0
-    kd_val = f"低檔黃金交叉 ✅（+{w}分）"
+    kd_val = f"低檔黃金交叉 ✅(+{w}分)"
     kd_col = "#2ecc71"
 elif kd_sell_signal:
     kd_buy_s, kd_sell_s = 0, w
-    kd_val = f"高檔死亡交叉 ⚠️（+{w}分賣）"
+    kd_val = f"高檔死亡交叉 ⚠️(+{w}分賣)"
     kd_col = "#e74c3c"
 elif k < thr["kd_buy"]:
     kd_buy_s, kd_sell_s = w * 0.3, 0
-    kd_val = f"低檔區尚未交叉（+{w*0.3:.0f}分）"
+    kd_val = f"低檔區尚未交叉(+{w*0.3:.0f}分)"
     kd_col = "#3498db"
 elif k > thr["kd_sell"]:
     kd_buy_s, kd_sell_s = 0, w * 0.3
-    kd_val = f"高檔區尚未交叉（+{w*0.3:.0f}分賣）"
+    kd_val = f"高檔區尚未交叉(+{w*0.3:.0f}分賣)"
     kd_col = "#f39c12"
 else:
     kd_buy_s, kd_sell_s = 0, 0
-    kd_val = "中性區間（0分）"
+    kd_val = "中性區間(0分)"
     kd_col = "#95a5a6"
 
 total_buy  += kd_buy_s
@@ -522,10 +522,10 @@ items.append(("KD", kd_val, kd_col,
               f"買進區門檻:K<{thr['kd_buy']}且K上穿D=滿分{w}分｜"
               f"賣出區門檻:K>{thr['kd_sell']}且K下穿D=滿分{w}分｜"
               f"在買賣區間內但尚未交叉={w*0.3:.0f}分｜"
-              f"正常區間（{thr['kd_buy']}～{thr['kd_sell']}）=0分",
+              f"正常區間({thr['kd_buy']}～{thr['kd_sell']})=0分",
               kd_buy_s, kd_sell_s))
 
-# ── 5. OBV（權重10）──────────────────────────────────────
+# ── 5. OBV(權重10)──────────────────────────────────────
 w = WEIGHTS["obv"]
 obv_buy_s = obv_sell_s = 0
 
@@ -536,25 +536,25 @@ if use_obv:
 
     if obv_rising and price_up:
         obv_buy_s = w
-        obv_val, obv_col = f"量價齊揚 ✅（+{w}分）", "#2ecc71"
+        obv_val, obv_col = f"量價齊揚 ✅(+{w}分)", "#2ecc71"
     elif obv_rising and not price_up:
         obv_buy_s = w * 0.6
-        obv_val, obv_col = f"OBV領先價格 💡（+{w*0.6:.0f}分）", "#3498db"
+        obv_val, obv_col = f"OBV領先價格 💡(+{w*0.6:.0f}分)", "#3498db"
     elif obv_falling and not price_up:
         obv_sell_s = w
-        obv_val, obv_col = f"量價齊跌 ⚠️（+{w}分賣）", "#e74c3c"
+        obv_val, obv_col = f"量價齊跌 ⚠️(+{w}分賣)", "#e74c3c"
     elif obv_falling and price_up:
         obv_sell_s = w * 0.6
-        obv_val, obv_col = f"價漲量縮背離 ⚠️（+{w*0.6:.0f}分賣）", "#f39c12"
+        obv_val, obv_col = f"價漲量縮背離 ⚠️(+{w*0.6:.0f}分賣)", "#f39c12"
     else:
-        obv_val, obv_col = "OBV中性（0分）", "#95a5a6"
+        obv_val, obv_col = "OBV中性(0分)", "#95a5a6"
 
     obv_detail = (f"OBV={'高於' if obv>obv_ma else '低於'}{thr['obv_ma_period']}日均線｜"
                   f"量價齊揚=滿分{w}分｜OBV領先={w*0.6:.0f}分｜"
                   f"量價齊跌=賣出{w}分｜價漲量縮背離=賣出{w*0.6:.0f}分｜"
                   f"OBV持續累積=買盤入場訊號｜OBV領先價格=預警買訊")
 else:
-    obv_val     = "已關閉（槓桿ETF不適用）"
+    obv_val     = "已關閉(槓桿ETF不適用)"
     obv_col     = "#bdc3c7"
     obv_detail  = "槓桿ETF成交量結構特殊，OBV訊號不具參考價值"
 
@@ -562,35 +562,35 @@ total_buy  += obv_buy_s
 total_sell += obv_sell_s
 items.append(("OBV", obv_val, obv_col, obv_detail, obv_buy_s, obv_sell_s))
 
-# ── 6. 乖離率MA20（權重10）───────────────────────────────
+# ── 6. 乖離率MA20(權重10)───────────────────────────────
 w = WEIGHTS["bias20"]
 b20_buy  = thr.get("bias20_buy",  thr.get("bias_buy",  -4.0))
 b20_sell = thr.get("bias20_sell", thr.get("bias_sell",  5.0))
 
 if bias20 < b20_buy:
     b20_buy_s, b20_sell_s = w, 0
-    b20_val = f"跌深反彈機會 ✅（+{w}分）"
+    b20_val = f"跌深反彈機會 ✅(+{w}分)"
     b20_col = "#2ecc71"
 elif bias20 > b20_sell:
     b20_buy_s, b20_sell_s = 0, w
-    b20_val = f"漲幅過高警示 ⚠️（+{w}分賣）"
+    b20_val = f"漲幅過高警示 ⚠️(+{w}分賣)"
     b20_col = "#e74c3c"
 else:
     b20_buy_s, b20_sell_s = 0, 0
-    b20_val = "正常範圍（0分）"
+    b20_val = "正常範圍(0分)"
     b20_col = "#95a5a6"
 
 total_buy  += b20_buy_s
 total_sell += b20_sell_s
 items.append((f"乖離率(MA{m})", b20_val, b20_col,
-              f"當前={bias20:.2f}%（收盤偏離MA{m}的幅度）｜"
+              f"當前={bias20:.2f}%(收盤偏離MA{m}的幅度)｜"
               f"正常區間:{b20_buy}%～+{b20_sell}%｜"
-              f"低於{b20_buy}%=跌深買進區（{w}分）｜"
-              f"高於+{b20_sell}%=漲多賣出區（{w}分）｜"
+              f"低於{b20_buy}%=跌深買進區({w}分)｜"
+              f"高於+{b20_sell}%=漲多賣出區({w}分)｜"
               f"在正常範圍內=0分",
               b20_buy_s, b20_sell_s))
 
-# ── 7. 量能趨勢（權重5）──────────────────────────────────
+# ── 7. 量能趨勢(權重5)──────────────────────────────────
 w = WEIGHTS["vol"]
 vol_ratio  = vol / vol_ma if vol_ma > 0 else 1
 vol_buy_s  = vol_sell_s = 0
@@ -599,19 +599,19 @@ if use_vol:
     price_up_today = close > float(prev["Close"])
     if vol_trend > 0 and vol_ratio > 1.2 and price_up_today:
         vol_buy_s = w
-        vol_val, vol_col = f"量能擴張 ✅（+{w}分）", "#2ecc71"
+        vol_val, vol_col = f"量能擴張 ✅(+{w}分)", "#2ecc71"
     elif vol_trend < 0 and vol_ratio < 0.8:
         vol_sell_s = w * 0.5
-        vol_val, vol_col = f"量能萎縮 ⚠️（+{w*0.5:.0f}分賣）", "#e74c3c"
+        vol_val, vol_col = f"量能萎縮 ⚠️(+{w*0.5:.0f}分賣)", "#e74c3c"
     else:
-        vol_val, vol_col = "量能平穩（0分）", "#95a5a6"
+        vol_val, vol_col = "量能平穩(0分)", "#95a5a6"
 
     vol_detail = (f"今日成交量／{thr['vol_ma_period']}日均量={vol_ratio:.2f}倍｜"
                   f"正常範圍:0.8～1.2倍｜"
                   f"量能擴張且價漲={w}分｜量能萎縮={w*0.5:.0f}分賣出｜"
                   f"量能為輔助指標，單獨參考價值較低")
 else:
-    vol_val    = "已關閉（槓桿ETF不適用）"
+    vol_val    = "已關閉(槓桿ETF不適用)"
     vol_col    = "#bdc3c7"
     vol_detail = "槓桿ETF成交量主要來自當沖套利，無法反映真實多空"
 
@@ -619,11 +619,11 @@ total_buy  += vol_buy_s
 total_sell += vol_sell_s
 items.append(("量能趨勢", vol_val, vol_col, vol_detail, vol_buy_s, vol_sell_s))
 
-# ── 價格行為（第三層確認，不計分但影響呈現）─────────────
+# ── 價格行為(第三層確認，不計分但影響呈現)─────────────
 is_red  = close > open_p
 chg_pct = (close - open_p) / open_p * 100
 items.append(("價格行為",
-              f"{'紅K' if is_red else '黑K'}（{chg_pct:+.2f}%）（參考）",
+              f"{'紅K' if is_red else '黑K'}({chg_pct:+.2f}%)(參考)",
               "#2ecc71" if is_red else "#e74c3c",
               f"開盤={open_p:.2f}｜收盤={close:.2f}｜當日漲跌={chg_pct:+.2f}%｜"
               f"紅K:收盤>開盤，買方強勢｜黑K:收盤<開盤，賣方強勢｜"
@@ -653,20 +653,20 @@ level_key, emoji, level_label = score_to_level(score)
 
 # 決定顯示文字和顏色
 if b60["locked"] and direction == "buy":
-    summary = f"🔥 過熱鎖定｜禁止追買（買進分={total_buy:.0f}分但被鎖定）"
+    summary = f"🔥 過熱鎖定｜禁止追買(買進分={total_buy:.0f}分但被鎖定)"
     advice  = (f"季線乖離{b60['bias60']:.1f}%超過歷史門檻，"
                f"即使技術面有{total_buy:.0f}分買進訊號，統計上追買風險極高")
     bg, border = "#fdecea", "#c0392b"
     final_level = "OVERHEATED"
 elif direction == "buy":
     dir_label = f"買進{level_label}"
-    summary   = f"{emoji} {dir_label}（{score:.0f}/{max_possible}分）"
+    summary   = f"{emoji} {dir_label}({score:.0f}/{max_possible}分)"
     advice    = _buy_advice(level_key, score)
     bg, border = _level_colors(level_key, "buy")
     final_level = f"BUY_{level_key}"
 else:
     dir_label = f"賣出{level_label}"
-    summary   = f"{emoji} {dir_label}（{score:.0f}/{max_possible}分）"
+    summary   = f"{emoji} {dir_label}({score:.0f}/{max_possible}分)"
     advice    = _sell_advice(level_key, score)
     bg, border = _level_colors(level_key, "sell")
     final_level = f"SELL_{level_key}"
@@ -746,11 +746,11 @@ suggs     = []
 if "BUY_" in level:
     batches = int(abs(drop_pct) / drop_step) if drop_pct < 0 else 0
     if batches == 0:
-        suggs.append(f"📌 第1批建倉:建議投入可用資金 <b>{add_ratio:.0f}%</b>（首批試單）")
+        suggs.append(f"📌 第1批建倉:建議投入可用資金 <b>{add_ratio:.0f}%</b>(首批試單)")
     else:
         suggs.append(f"📌 第{batches+1}批加碼:距高點回落 {abs(drop_pct):.1f}%，"
                      f"建議再投入剩餘資金 <b>{add_ratio:.0f}%</b>")
-        suggs.append(f"　　累計已達 {batches} 次加碼條件（每跌 {drop_step:.0f}% 加一批）")
+        suggs.append(f"　　累計已達 {batches} 次加碼條件(每跌 {drop_step:.0f}% 加一批)")
     if is_cons:
         suggs.append(f"⏱️ 時間補位提醒:近 {time_days} 日盤整幅度僅 {range_pct:.1f}%，"
                      f"可考慮投入剩餘資金 <b>{time_ratio:.0f}%</b> 進行時間性補位")
@@ -858,7 +858,7 @@ f’<td style="padding:8px 12px;font-weight:bold;">{r["close"]:.2f}</td>’
 f’<td style="padding:8px 12px;font-size:16px;">{r["emoji"]}</td>’
 f’<td style="padding:8px 12px;font-weight:bold;color:{r["border"]};">{r["summary"]}</td>’
 f’<td style="padding:8px 12px;font-size:12px;color:#777;">’
-f’買{r["buy_score"]:.0f}/賣{r["sell_score"]:.0f}（滿分{r["max_possible"]}）</td>’
+f’買{r["buy_score"]:.0f}/賣{r["sell_score"]:.0f}(滿分{r["max_possible"]})</td>’
 f’</tr>’)
 return (f’<table style="width:100%;border-collapse:collapse;margin-bottom:28px;'
 f'border:1px solid #ddd;border-radius:8px;overflow:hidden;">’
@@ -912,7 +912,7 @@ f’</div></body></html>’)
 def send_email(cfg: dict, html: str, today: str) -> bool:
 gmail_pass = os.environ.get("GMAIL_PASSWORD", "")
 if not gmail_pass:
-print("⚠️  未設定 GMAIL_PASSWORD（GitHub Secret），跳過發信")
+print("⚠️  未設定 GMAIL_PASSWORD(GitHub Secret)，跳過發信")
 return False
 ec  = cfg["email"]
 msg = MIMEMultipart("alternative")
@@ -937,7 +937,7 @@ today = datetime.today().strftime("%Y/%m/%d")
 print(f"[{datetime.now().strftime(’%Y-%m-%d %H:%M’)}] 開始分析，共 {len(cfg[‘watchlist’])} 檔")
 
 ```
-# 三大法人資料只抓一次（所有股票共用同一份當日資料）
+# 三大法人資料只抓一次(所有股票共用同一份當日資料)
 print("  抓取三大法人資料...", end=" ")
 inst_cache = {}
 for stock in cfg["watchlist"]:
