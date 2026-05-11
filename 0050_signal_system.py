@@ -1,5 +1,4 @@
-# """
-Daily Stock Signal System v5
+# Daily Stock Signal System v5
 
 Repository: github.com/ryanhsu1983/AI_stock_0050
 v5 updates:
@@ -8,7 +7,7 @@ v5 updates:
 - 4-level signals (notice/weak/mid/strong)
 - TWSE institutional investors crawler with validation
 - Independent buy/sell scoring
-  """
+
 
 import json, os, smtplib, time, requests
 import yfinance as yf
@@ -86,17 +85,8 @@ return {
 # ══════════════════════════════════════════════════════════════
 
 def fetch_institutional(ticker_raw: str) -> dict:
-"""
-Data retrieved from the Taiwan Stock Exchange (TWSE) showing the net buy and sell volumes of the three major institutional investors on that day.
-Returned to dict:
-success: bool
+# Data retrieved from the Taiwan Stock Exchange (TWSE) showing the net buy and sell volumes of the three major institutional investors on that day.Returned to dict: success: bool. foreign_net: Net buy and sell volume of foreign investors (number of shares) invest_net: Net buy and sell volume of investment trusts (number of shares) dealer_net: Net buy and sell volume of proprietary traders (number of shares) total_net: Total net buy and sell volume of the three major institutional investors (number of shares) error: Error message (when success=False)
 
-foreign_net: Net buy and sell volume of foreign investors (number of shares)
-invest_net: Net buy and sell volume of investment trusts (number of shares)
-dealer_net: Net buy and sell volume of proprietary traders (number of shares)
-total_net: Total net buy and sell volume of the three major institutional investors (number of shares)
-error: Error message (when success=False)
-"""
 # 標準化股票代號(去掉 .TW)
 stock_id = ticker_raw.upper().replace(".TW", "").replace(".TWO", "")
 
@@ -305,7 +295,7 @@ return dict(zone=zone, locked=locked, bias60=bias60,
 # ══════════════════════════════════════════════════════════════
 
 def score_to_level(score: float) -> tuple:
-"""return (level_key, emoji, label)"""
+# return (level_key, emoji, label)
 for threshold, key, emoji, label in SIGNAL_LEVELS:
 if score >= threshold:
 return key, emoji, label
