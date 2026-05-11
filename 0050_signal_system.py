@@ -1,4 +1,4 @@
-# “””
+# """
 Daily Stock Signal System v5
 
 Repository: github.com/ryanhsu1983/AI_stock_0050
@@ -8,7 +8,7 @@ v5 updates:
 - 4-level signals (notice/weak/mid/strong)
 - TWSE institutional investors crawler with validation
 - Independent buy/sell scoring
-  “””
+  """
 
 import json, os, smtplib, time, requests
 import yfinance as yf
@@ -25,13 +25,13 @@ from pathlib import Path
 # ══════════════════════════════════════════════════════════════
 
 WEIGHTS = {
-“trend”:       25,   # 趨勢環境（均線排列）
-“macd”:        20,   # MACD 動能轉折
-“institutional”: 15, # 三大法人買賣超
-“kd”:          15,   # KD 交叉
-“obv”:         10,   # OBV 量價關係
-“bias20”:      10,   # 短線乖離率
-“vol”:          5,   # 量能趨勢
+"trend":       25,   # 趨勢環境（均線排列）
+"macd":        20,   # MACD 動能轉折
+"institutional": 15, # 三大法人買賣超
+"kd":          15,   # KD 交叉
+"obv":         10,   # OBV 量價關係
+"bias20":      10,   # 短線乖離率
+"vol":          5,   # 量能趨勢
 }
 
 # BIAS60 Z-Score 不計入分數，但過熱時鎖定所有買進
@@ -39,11 +39,11 @@ WEIGHTS = {
 # 四級訊號門檻
 
 SIGNAL_LEVELS = [
-(70, “STRONG”,  “🔴”, “強訊號”),
-(50, “MID”,     “🟠”, “中訊號”),
-(30, “WEAK”,    “🟡”, “弱訊號”),
-(15, “NOTICE”,  “🔵”, “提醒”),
-( 0, “NEUTRAL”, “⚪”, “無訊號”),
+(70, "STRONG",  "🔴", "強訊號"),
+(50, "MID",     "🟠", "中訊號"),
+(30, "WEAK",    "🟡", "弱訊號"),
+(15, "NOTICE",  "🔵", "提醒"),
+( 0, "NEUTRAL", "⚪", "無訊號"),
 ]
 
 # ══════════════════════════════════════════════════════════════
@@ -53,30 +53,30 @@ SIGNAL_LEVELS = [
 # ══════════════════════════════════════════════════════════════
 
 def load_config() -> dict:
-with open(Path(**file**).parent / “config.json”, “r”, encoding=“utf-8”) as f:
+with open(Path(**file**).parent / "config.json", "r", encoding="utf-8") as f:
 return json.load(f)
 
 def get_stock_cfg(stock: dict, global_cfg: dict) -> dict:
-ov  = stock.get(“overrides”, {})
-thr = dict(global_cfg[“thresholds”])
-ma  = dict(global_cfg[“ma_periods”])
-for key in (“kd_buy”,“kd_sell”,“bias20_buy”,“bias20_sell”,
-“bias60_p_low”,“bias60_p_high”,“vol_ma_period”,“obv_ma_period”):
+ov  = stock.get("overrides", {})
+thr = dict(global_cfg["thresholds"])
+ma  = dict(global_cfg["ma_periods"])
+for key in ("kd_buy","kd_sell","bias20_buy","bias20_sell",
+"bias60_p_low","bias60_p_high","vol_ma_period","obv_ma_period"):
 if key in ov:
 thr[key] = ov[key]
-if “bias_buy”  in thr and “bias20_buy”  not in thr: thr[“bias20_buy”]  = thr[“bias_buy”]
-if “bias_sell” in thr and “bias20_sell” not in thr: thr[“bias20_sell”] = thr[“bias_sell”]
-if “ma_periods” in ov:
-ma.update(ov[“ma_periods”])
+if "bias_buy"  in thr and "bias20_buy"  not in thr: thr["bias20_buy"]  = thr["bias_buy"]
+if "bias_sell" in thr and "bias20_sell" not in thr: thr["bias20_sell"] = thr["bias_sell"]
+if "ma_periods" in ov:
+ma.update(ov["ma_periods"])
 return {
-“thresholds”:       thr,
-“ma_periods”:       ma,
-“pyramid”:          global_cfg.get(“pyramid”, {}),
-“use_obv”:          ov.get(“use_obv”,          True),
-“use_vol_trend”:    ov.get(“use_vol_trend”,     True),
-“use_institutional”:ov.get(“use_institutional”, True),
-“leverage_warning”: ov.get(“leverage_warning”,  False),
-“bias60_locked”:    ov.get(“bias60_locked”,     True),
+"thresholds":       thr,
+"ma_periods":       ma,
+"pyramid":          global_cfg.get("pyramid", {}),
+"use_obv":          ov.get("use_obv",          True),
+"use_vol_trend":    ov.get("use_vol_trend",     True),
+"use_institutional":ov.get("use_institutional", True),
+"leverage_warning": ov.get("leverage_warning",  False),
+"bias60_locked":    ov.get("bias60_locked",     True),
 }
 
 # ══════════════════════════════════════════════════════════════
@@ -86,7 +86,7 @@ return {
 # ══════════════════════════════════════════════════════════════
 
 def fetch_institutional(ticker_raw: str) -> dict:
-“””
+"""
 從台灣證交所抓取三大法人當日買賣超。
 回傳 dict：
 success      : bool
@@ -95,9 +95,9 @@ invest_net   : 投信買賣超（張）
 dealer_net   : 自營商買賣超（張）
 total_net    : 三大合計（張）
 error        : 錯誤訊息（success=False 時）
-“””
+"""
 # 標準化股票代號（去掉 .TW）
-stock_id = ticker_raw.upper().replace(”.TW”, “”).replace(”.TWO”, “”)
+stock_id = ticker_raw.upper().replace(".TW", "").replace(".TWO", "")
 
 ```
 try:
@@ -186,13 +186,13 @@ def fetch_data(ticker: str, days: int) -> pd.DataFrame:
 end   = datetime.today()
 start = end - timedelta(days=days)
 df = yf.download(ticker,
-start=start.strftime(”%Y-%m-%d”),
-end=end.strftime(”%Y-%m-%d”),
+start=start.strftime("%Y-%m-%d"),
+end=end.strftime("%Y-%m-%d"),
 progress=False, auto_adjust=True)
 if df.empty:
-raise ValueError(f”無法取得 {ticker} 資料”)
+raise ValueError(f"無法取得 {ticker} 資料")
 df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
-return df[[“Open”,“High”,“Low”,“Close”,“Volume”]].dropna()
+return df[["Open","High","Low","Close","Volume"]].dropna()
 
 # ══════════════════════════════════════════════════════════════
 
@@ -201,9 +201,9 @@ return df[[“Open”,“High”,“Low”,“Close”,“Volume”]].dropna()
 # ══════════════════════════════════════════════════════════════
 
 def calc_indicators(df: pd.DataFrame, scfg: dict) -> pd.DataFrame:
-ma  = scfg[“ma_periods”]
-thr = scfg[“thresholds”]
-s, m, l = ma[“short”], ma[“mid”], ma[“long”]
+ma  = scfg["ma_periods"]
+thr = scfg["thresholds"]
+s, m, l = ma["short"], ma["mid"], ma["long"]
 
 ```
 df[f"MA{s}"] = df["Close"].rolling(s).mean()
@@ -258,13 +258,13 @@ return df
 
 def eval_bias60(df: pd.DataFrame, scfg: dict) -> dict:
 latest   = df.iloc[-1]
-bias60   = float(latest[“BIAS60”])
-z        = float(latest[“BIAS60_Z”])
-p_high   = df.attrs[“bias60_p_high”]
-p_low    = df.attrs[“bias60_p_low”]
-ph_pct   = scfg[“thresholds”].get(“bias60_p_high”, 95)
-pl_pct   = scfg[“thresholds”].get(“bias60_p_low”,   5)
-can_lock = scfg.get(“bias60_locked”, True)
+bias60   = float(latest["BIAS60"])
+z        = float(latest["BIAS60_Z"])
+p_high   = df.attrs["bias60_p_high"]
+p_low    = df.attrs["bias60_p_low"]
+ph_pct   = scfg["thresholds"].get("bias60_p_high", 95)
+pl_pct   = scfg["thresholds"].get("bias60_p_low",   5)
+can_lock = scfg.get("bias60_locked", True)
 
 ```
 if bias60 >= p_high:
@@ -304,11 +304,11 @@ return dict(zone=zone, locked=locked, bias60=bias60,
 # ══════════════════════════════════════════════════════════════
 
 def score_to_level(score: float) -> tuple:
-“”“回傳 (level_key, emoji, label)”””
+"""回傳 (level_key, emoji, label)"""
 for threshold, key, emoji, label in SIGNAL_LEVELS:
 if score >= threshold:
 return key, emoji, label
-return “NEUTRAL”, “⚪”, “無訊號”
+return "NEUTRAL", "⚪", "無訊號"
 
 # ══════════════════════════════════════════════════════════════
 
@@ -317,13 +317,13 @@ return “NEUTRAL”, “⚪”, “無訊號”
 # ══════════════════════════════════════════════════════════════
 
 def evaluate(df: pd.DataFrame, scfg: dict, inst: dict) -> dict:
-thr      = scfg[“thresholds”]
-ma       = scfg[“ma_periods”]
-use_obv  = scfg.get(“use_obv”,          True)
-use_vol  = scfg.get(“use_vol_trend”,     True)
-use_inst = scfg.get(“use_institutional”, True)
-lev_warn = scfg.get(“leverage_warning”,  False)
-s, m, l  = ma[“short”], ma[“mid”], ma[“long”]
+thr      = scfg["thresholds"]
+ma       = scfg["ma_periods"]
+use_obv  = scfg.get("use_obv",          True)
+use_vol  = scfg.get("use_vol_trend",     True)
+use_inst = scfg.get("use_institutional", True)
+lev_warn = scfg.get("leverage_warning",  False)
+s, m, l  = ma["short"], ma["mid"], ma["long"]
 
 ```
 latest = df.iloc[-1]
@@ -687,39 +687,39 @@ return dict(
 
 def _buy_advice(level_key, score):
 return {
-“STRONG”:  f”多指標強力共振，高信心買進機會，可按金字塔計畫分批建倉”,
-“MID”:     f”中等強度訊號，可考慮少量試單，等待更多確認再加碼”,
-“WEAK”:    f”弱訊號，建議觀察等待，訊號增強後再行動”,
-“NOTICE”:  f”微弱訊號，僅供留意，不建議單獨行動”,
-“NEUTRAL”: f”無明顯買進依據，繼續觀察”,
-}.get(level_key, “繼續觀察”)
+"STRONG":  f"多指標強力共振，高信心買進機會，可按金字塔計畫分批建倉",
+"MID":     f"中等強度訊號，可考慮少量試單，等待更多確認再加碼",
+"WEAK":    f"弱訊號，建議觀察等待，訊號增強後再行動",
+"NOTICE":  f"微弱訊號，僅供留意，不建議單獨行動",
+"NEUTRAL": f"無明顯買進依據，繼續觀察",
+}.get(level_key, "繼續觀察")
 
 def _sell_advice(level_key, score):
 return {
-“STRONG”:  f”多指標同步發出賣出訊號，建議考慮出場或減碼”,
-“MID”:     f”中等賣出訊號，持有者應提高警覺，考慮設定停損”,
-“WEAK”:    f”弱賣出訊號，持有者注意風險，暫不急於出場”,
-“NOTICE”:  f”微弱賣出跡象，僅供留意”,
-“NEUTRAL”: f”無明顯賣出依據，繼續持有觀察”,
-}.get(level_key, “繼續觀察”)
+"STRONG":  f"多指標同步發出賣出訊號，建議考慮出場或減碼",
+"MID":     f"中等賣出訊號，持有者應提高警覺，考慮設定停損",
+"WEAK":    f"弱賣出訊號，持有者注意風險，暫不急於出場",
+"NOTICE":  f"微弱賣出跡象，僅供留意",
+"NEUTRAL": f"無明顯賣出依據，繼續持有觀察",
+}.get(level_key, "繼續觀察")
 
 def _level_colors(level_key, direction):
-if direction == “buy”:
+if direction == "buy":
 return {
-“STRONG”:  (”#fdecea”, “#e74c3c”),
-“MID”:     (”#fef5e7”, “#e67e22”),
-“WEAK”:    (”#fef9e7”, “#f39c12”),
-“NOTICE”:  (”#eaf4fb”, “#3498db”),
-“NEUTRAL”: (”#f8f9fa”, “#95a5a6”),
-}.get(level_key, (”#f8f9fa”, “#95a5a6”))
+"STRONG":  ("#fdecea", "#e74c3c"),
+"MID":     ("#fef5e7", "#e67e22"),
+"WEAK":    ("#fef9e7", "#f39c12"),
+"NOTICE":  ("#eaf4fb", "#3498db"),
+"NEUTRAL": ("#f8f9fa", "#95a5a6"),
+}.get(level_key, ("#f8f9fa", "#95a5a6"))
 else:
 return {
-“STRONG”:  (”#eaf4fb”, “#2980b9”),
-“MID”:     (”#f4ecf7”, “#8e44ad”),
-“WEAK”:    (”#f8f9fa”, “#7f8c8d”),
-“NOTICE”:  (”#f8f9fa”, “#95a5a6”),
-“NEUTRAL”: (”#f8f9fa”, “#95a5a6”),
-}.get(level_key, (”#f8f9fa”, “#95a5a6”))
+"STRONG":  ("#eaf4fb", "#2980b9"),
+"MID":     ("#f4ecf7", "#8e44ad"),
+"WEAK":    ("#f8f9fa", "#7f8c8d"),
+"NOTICE":  ("#f8f9fa", "#95a5a6"),
+"NEUTRAL": ("#f8f9fa", "#95a5a6"),
+}.get(level_key, ("#f8f9fa", "#95a5a6"))
 
 # ══════════════════════════════════════════════════════════════
 
@@ -728,11 +728,11 @@ return {
 # ══════════════════════════════════════════════════════════════
 
 def calc_pyramid(df: pd.DataFrame, scfg: dict, level: str) -> dict:
-py         = scfg.get(“pyramid”, {})
-drop_step  = py.get(“add_per_drop_pct”,    5.0)
-add_ratio  = py.get(“add_ratio_pct”,       20.0)
-time_days  = py.get(“time_rebalance_days”, 20)
-time_ratio = py.get(“time_add_ratio_pct”,   5.0)
+py         = scfg.get("pyramid", {})
+drop_step  = py.get("add_per_drop_pct",    5.0)
+add_ratio  = py.get("add_ratio_pct",       20.0)
+time_days  = py.get("time_rebalance_days", 20)
+time_ratio = py.get("time_add_ratio_pct",   5.0)
 
 ```
 close     = float(df["Close"].iloc[-1])
@@ -766,18 +766,18 @@ return dict(drop_pct=drop_pct, is_consolidating=is_cons,
 # ══════════════════════════════════════════════════════════════
 
 def score_bar_html(buy_score, sell_score, max_score, b60_locked):
-“”“產生買進/賣出分數視覺化橫條”””
+"""產生買進/賣出分數視覺化橫條"""
 buy_pct  = min(buy_score  / max_score * 100, 100)
 sell_pct = min(sell_score / max_score * 100, 100)
-lock_note = ’ <span style="color:#c0392b;font-size:11px;">🔥 過熱鎖定</span>’ if b60_locked else “”
+lock_note = ’ <span style="color:#c0392b;font-size:11px;">🔥 過熱鎖定</span>’ if b60_locked else ""
 return (
 f’<div style="padding:10px 16px;background:#f8f9fa;border-bottom:1px solid #eee;">’
 f’<div style="display:flex;gap:16px;align-items:center;">’
 f’<div style="flex:1;">’
 f’<div style="font-size:11px;color:#555;margin-bottom:3px;">買進分數：{buy_score:.0f}/{max_score}分{lock_note}</div>’
 f’<div style="background:#ddd;border-radius:4px;height:10px;">’
-f’<div style=“background:{”#aaa” if b60_locked else “#2ecc71”};’
-f’width:{buy_pct:.0f}%;height:10px;border-radius:4px;”></div></div></div>’
+f’<div style="background:{"#aaa" if b60_locked else "#2ecc71"};’
+f’width:{buy_pct:.0f}%;height:10px;border-radius:4px;"></div></div></div>’
 f’<div style="flex:1;">’
 f’<div style="font-size:11px;color:#555;margin-bottom:3px;">賣出分數：{sell_score:.0f}/{max_score}分</div>’
 f’<div style="background:#ddd;border-radius:4px;height:10px;">’
@@ -785,16 +785,16 @@ f’<div style="background:#e74c3c;width:{sell_pct:.0f}%;height:10px;border-radi
 f’</div></div></div></div>’
 )
 
-def stock_html_block(name: str, ticker: str, result: dict, note: str = “”) -> str:
-rows = “”
-for idx, item in enumerate(result[“items”]):
+def stock_html_block(name: str, ticker: str, result: dict, note: str = "") -> str:
+rows = ""
+for idx, item in enumerate(result["items"]):
 label, value, color, n = item[0], item[1], item[2], item[3]
-parts = [p.strip() for p in n.split(“｜”) if p.strip()]
-note_items = “”.join(
+parts = [p.strip() for p in n.split("｜") if p.strip()]
+note_items = "".join(
 f’<span style="display:block;margin:2px 0;">’
 f’<span style="color:#bbb;margin-right:4px;">{i+1}.</span>{p}</span>’
 for i, p in enumerate(parts))
-bg_row = “#fafafa” if idx % 2 == 0 else “#ffffff”
+bg_row = "#fafafa" if idx % 2 == 0 else "#ffffff"
 rows += (f’<tr style="background:{bg_row};border-bottom:1px solid #eee;">’
 f’<td style="padding:8px 10px;color:#444;width:120px;font-size:13px;'
 f'font-weight:bold;vertical-align:top;white-space:nowrap;">{label}</td>’
@@ -841,24 +841,24 @@ return (
 ```
 
 def summary_table(results: list) -> str:
-rows = “”
+rows = ""
 for name, ticker, r in results:
-badge = “”
-if r[“b60”][“zone”] == “overheated”:
+badge = ""
+if r["b60"]["zone"] == "overheated":
 badge = (’ <span style="background:#c0392b;color:#fff;font-size:10px;'
 'padding:2px 6px;border-radius:4px;">🔥過熱</span>’)
-elif r[“b60”][“zone”] == “oversold”:
+elif r["b60"]["zone"] == "oversold":
 badge = (’ <span style="background:#2980b9;color:#fff;font-size:10px;'
 'padding:2px 6px;border-radius:4px;">❄️超跌</span>’)
 rows += (f’<tr style="border-bottom:1px solid #eee;">’
 f’<td style="padding:8px 12px;">{name}{badge}</td>’
 f’<td style="padding:8px 12px;color:#777;">’
-f’{ticker.replace(”.TW”,””).replace(”.tw”,””)}</td>’
-f’<td style="padding:8px 12px;font-weight:bold;">{r[“close”]:.2f}</td>’
-f’<td style="padding:8px 12px;font-size:16px;">{r[“emoji”]}</td>’
-f’<td style=“padding:8px 12px;font-weight:bold;color:{r[“border”]};”>{r[“summary”]}</td>’
+f’{ticker.replace(".TW","").replace(".tw","")}</td>’
+f’<td style="padding:8px 12px;font-weight:bold;">{r["close"]:.2f}</td>’
+f’<td style="padding:8px 12px;font-size:16px;">{r["emoji"]}</td>’
+f’<td style="padding:8px 12px;font-weight:bold;color:{r["border"]};">{r["summary"]}</td>’
 f’<td style="padding:8px 12px;font-size:12px;color:#777;">’
-f’買{r[“buy_score”]:.0f}/賣{r[“sell_score”]:.0f}（滿分{r[“max_possible”]}）</td>’
+f’買{r["buy_score"]:.0f}/賣{r["sell_score"]:.0f}（滿分{r["max_possible"]}）</td>’
 f’</tr>’)
 return (f’<table style="width:100%;border-collapse:collapse;margin-bottom:28px;'
 f'border:1px solid #ddd;border-radius:8px;overflow:hidden;">’
@@ -873,14 +873,14 @@ f’</tr></thead><tbody>{rows}</tbody></table>’)
 
 def build_email_html(results: list, today: str) -> str:
 overview = summary_table(results)
-details  = “”.join(
-stock_html_block(n, t, r, note=r.get(“stock_note”, “”))
+details  = "".join(
+stock_html_block(n, t, r, note=r.get("stock_note", ""))
 for n, t, r in results)
 weights_note = (
-f’趨勢環境{WEIGHTS[“trend”]}分｜MACD {WEIGHTS[“macd”]}分｜’
-f’三大法人{WEIGHTS[“institutional”]}分｜KD {WEIGHTS[“kd”]}分｜’
-f’OBV {WEIGHTS[“obv”]}分｜乖離率{WEIGHTS[“bias20”]}分｜’
-f’量能{WEIGHTS[“vol”]}分｜總分100分｜’
+f’趨勢環境{WEIGHTS["trend"]}分｜MACD {WEIGHTS["macd"]}分｜’
+f’三大法人{WEIGHTS["institutional"]}分｜KD {WEIGHTS["kd"]}分｜’
+f’OBV {WEIGHTS["obv"]}分｜乖離率{WEIGHTS["bias20"]}分｜’
+f’量能{WEIGHTS["vol"]}分｜總分100分｜’
 f’強訊號≥70｜中訊號50-69｜弱訊號30-49｜提醒15-29’)
 return (
 f’<!DOCTYPE html><html><head><meta charset="utf-8"></head>’
@@ -910,19 +910,19 @@ f’</div></body></html>’)
 # ══════════════════════════════════════════════════════════════
 
 def send_email(cfg: dict, html: str, today: str) -> bool:
-gmail_pass = os.environ.get(“GMAIL_PASSWORD”, “”)
+gmail_pass = os.environ.get("GMAIL_PASSWORD", "")
 if not gmail_pass:
-print(“⚠️  未設定 GMAIL_PASSWORD（GitHub Secret），跳過發信”)
+print("⚠️  未設定 GMAIL_PASSWORD（GitHub Secret），跳過發信")
 return False
-ec  = cfg[“email”]
-msg = MIMEMultipart(“alternative”)
-msg[“Subject”] = ec[“subject”].format(date=today)
-msg[“From”]    = ec[“from”]
-msg[“To”]      = ec[“to”]
-msg.attach(MIMEText(html, “html”, “utf-8”))
-with smtplib.SMTP_SSL(“smtp.gmail.com”, 465) as s:
-s.login(ec[“from”], gmail_pass)
-s.sendmail(ec[“from”], ec[“to”], msg.as_string())
+ec  = cfg["email"]
+msg = MIMEMultipart("alternative")
+msg["Subject"] = ec["subject"].format(date=today)
+msg["From"]    = ec["from"]
+msg["To"]      = ec["to"]
+msg.attach(MIMEText(html, "html", "utf-8"))
+with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
+s.login(ec["from"], gmail_pass)
+s.sendmail(ec["from"], ec["to"], msg.as_string())
 return True
 
 # ══════════════════════════════════════════════════════════════
@@ -933,8 +933,8 @@ return True
 
 def main():
 cfg   = load_config()
-today = datetime.today().strftime(”%Y/%m/%d”)
-print(f”[{datetime.now().strftime(’%Y-%m-%d %H:%M’)}] 開始分析，共 {len(cfg[‘watchlist’])} 檔”)
+today = datetime.today().strftime("%Y/%m/%d")
+print(f"[{datetime.now().strftime(’%Y-%m-%d %H:%M’)}] 開始分析，共 {len(cfg[‘watchlist’])} 檔")
 
 ```
 # 三大法人資料只抓一次（所有股票共用同一份當日資料）
@@ -985,5 +985,5 @@ except Exception as e:
     print(f"❌ Email 失敗：{e}")
 ```
 
-if **name** == “**main**”:
+if **name** == "**main**":
 main()
