@@ -606,7 +606,7 @@ if use_vol:
     else:
         vol_val, vol_col = "量能平穩(0分)", "#95a5a6"
 
-    vol_detail = (f"今日成交量／{thr['vol_ma_period']}日均量={vol_ratio:.2f}倍｜"
+    vol_detail = (f"今日成交量/{thr['vol_ma_period']}日均量={vol_ratio:.2f}倍｜"
                   f"正常範圍:0.8～1.2倍｜"
                   f"量能擴張且價漲={w}分｜量能萎縮={w*0.5:.0f}分賣出｜"
                   f"量能為輔助指標，單獨參考價值較低")
