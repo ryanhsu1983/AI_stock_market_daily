@@ -87,14 +87,15 @@ return {
 
 def fetch_institutional(ticker_raw: str) -> dict:
 """
-從台灣證交所抓取三大法人當日買賣超.
-回傳 dict:
-success      : bool
-foreign_net  : 外資買賣超(張)
-invest_net   : 投信買賣超(張)
-dealer_net   : 自營商買賣超(張)
-total_net    : 三大合計(張)
-error        : 錯誤訊息(success=False 時)
+Data retrieved from the Taiwan Stock Exchange (TWSE) showing the net buy and sell volumes of the three major institutional investors on that day.
+Returned to dict:
+success: bool
+
+foreign_net: Net buy and sell volume of foreign investors (number of shares)
+invest_net: Net buy and sell volume of investment trusts (number of shares)
+dealer_net: Net buy and sell volume of proprietary traders (number of shares)
+total_net: Total net buy and sell volume of the three major institutional investors (number of shares)
+error: Error message (when success=False)
 """
 # 標準化股票代號(去掉 .TW)
 stock_id = ticker_raw.upper().replace(".TW", "").replace(".TWO", "")
@@ -304,7 +305,7 @@ return dict(zone=zone, locked=locked, bias60=bias60,
 # ══════════════════════════════════════════════════════════════
 
 def score_to_level(score: float) -> tuple:
-"""回傳 (level_key, emoji, label)"""
+"""return (level_key, emoji, label)"""
 for threshold, key, emoji, label in SIGNAL_LEVELS:
 if score >= threshold:
 return key, emoji, label
