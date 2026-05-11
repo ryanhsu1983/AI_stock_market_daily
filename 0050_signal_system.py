@@ -766,7 +766,6 @@ return dict(drop_pct=drop_pct, is_consolidating=is_cons,
 # ══════════════════════════════════════════════════════════════
 
 def score_bar_html(buy_score, sell_score, max_score, b60_locked):
-"""產生買進/賣出分數視覺化橫條"""
 buy_pct  = min(buy_score  / max_score * 100, 100)
 sell_pct = min(sell_score / max_score * 100, 100)
 lock_note = ’ <span style="color:#c0392b;font-size:11px;">🔥 過熱鎖定</span>’ if b60_locked else ""
