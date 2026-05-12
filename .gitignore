@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+email_preview.html
+.yfinance_cache/

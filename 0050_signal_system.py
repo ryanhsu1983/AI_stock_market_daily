@@ -5,7 +5,11 @@ Repository : github.com/ryanhsu1983/AI_stock_0050
 v4 新增：每檔股票獨立 overrides 設定，支援個別化指標門檻與開關
 """
 
-import json, os, smtplib, sys
+import html as html_lib
+import json, os, re, smtplib, sys, requests
+import xml.etree.ElementTree as ET
+from email.utils import parsedate_to_datetime
+from urllib.parse import quote_plus
 import yfinance as yf
 import pandas as pd
 from datetime import datetime, timedelta
@@ -17,6 +21,35 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
+
+CACHE_DIR = Path(__file__).parent / ".yfinance_cache"
+CACHE_DIR.mkdir(exist_ok=True)
+yf.cache.set_cache_location(str(CACHE_DIR))
+
+UP_COLOR = "#c0392b"
+DOWN_COLOR = "#168f4d"
+WARN_COLOR = "#e67e22"
+INFO_COLOR = "#3498db"
+NEUTRAL_COLOR = "#95a5a6"
+
+WEIGHTS = {
+    "trend": 25,
+    "macd": 20,
+    "institutional": 15,
+    "kd": 12,
+    "obv": 8,
+    "fx": 7,
+    "rates": 7,
+    "vol": 6,
+}
+
+SIGNAL_LEVELS = [
+    (70, "STRONG", "強訊號"),
+    (50, "MID", "中訊號"),
+    (30, "WEAK", "弱訊號"),
+    (15, "NOTICE", "提醒"),
+    (0, "NEUTRAL", "無訊號"),
+]
 
 
 # ── 讀取設定 ────────────────────────────────────────────────
@@ -54,8 +87,106 @@ def get_stock_cfg(stock: dict, global_cfg: dict) -> dict:
         "pyramid":          global_cfg.get("pyramid", {}),
         "use_obv":          ov.get("use_obv",          True),
         "use_vol_trend":    ov.get("use_vol_trend",     True),
+        "use_institutional":ov.get("use_institutional", True),
+        "use_fx":           ov.get("use_fx",            True),
+        "use_rates":        ov.get("use_rates",         True),
+        "macro_sensitivity": ov.get("macro_sensitivity", "market"),
         "leverage_warning": ov.get("leverage_warning",  False),
         "bias60_locked":    ov.get("bias60_locked",     True),
+    }
+
+
+def _parse_int(value) -> int:
+    try:
+        return int(str(value).replace(",", "").replace(" ", ""))
+    except Exception:
+        return 0
+
+
+def _find_field(fields: list, *keywords: str) -> int | None:
+    for idx, field in enumerate(fields):
+        if all(keyword in field for keyword in keywords):
+            return idx
+    return None
+
+
+def _find_exact_field(fields: list, name: str) -> int | None:
+    try:
+        return fields.index(name)
+    except ValueError:
+        return None
+
+
+# ── 三大法人資料 ─────────────────────────────────────────────
+def fetch_institutional(ticker: str, lookback_days: int = 7) -> dict:
+    stock_id = ticker.upper().replace(".TW", "").replace(".TWO", "")
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Referer": "https://www.twse.com.tw/",
+    }
+
+    last_error = ""
+    for offset in range(lookback_days):
+        date_str = (datetime.today() - timedelta(days=offset)).strftime("%Y%m%d")
+        url = (
+            "https://www.twse.com.tw/rwd/zh/fund/T86"
+            f"?response=json&date={date_str}&selectType=ALL"
+        )
+        try:
+            resp = requests.get(url, headers=headers, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as exc:
+            last_error = f"證交所連線失敗:{str(exc)[:80]}"
+            continue
+
+        if data.get("stat") != "OK":
+            last_error = f"{date_str} 狀態:{data.get('stat')}"
+            continue
+
+        fields = data.get("fields", [])
+        rows = data.get("data", [])
+        idx_id = _find_field(fields, "證券代號")
+        idx_foreign = (
+            _find_exact_field(fields, "外陸資買賣超股數(不含外資自營商)")
+            or _find_field(fields, "外陸資", "買賣超")
+        )
+        idx_invest = _find_exact_field(fields, "投信買賣超股數") or _find_field(fields, "投信", "買賣超")
+        idx_dealer = _find_exact_field(fields, "自營商買賣超股數")
+        idx_total = _find_exact_field(fields, "三大法人買賣超股數")
+
+        if None in (idx_id, idx_foreign, idx_invest, idx_dealer):
+            last_error = f"{date_str} 欄位格式異動"
+            continue
+
+        for row in rows:
+            if str(row[idx_id]).strip() == stock_id:
+                foreign = _parse_int(row[idx_foreign])
+                invest = _parse_int(row[idx_invest])
+                dealer = _parse_int(row[idx_dealer])
+                total = _parse_int(row[idx_total]) if idx_total is not None else foreign + invest + dealer
+                return {
+                    "success": True,
+                    "date": date_str,
+                    "foreign_net": foreign,
+                    "invest_net": invest,
+                    "dealer_net": dealer,
+                    "total_net": total,
+                    "error": "",
+                }
+        last_error = f"{date_str} 找不到 {stock_id}"
+
+    return {
+        "success": False,
+        "date": "",
+        "foreign_net": 0,
+        "invest_net": 0,
+        "dealer_net": 0,
+        "total_net": 0,
+        "error": last_error or "無三大法人資料",
     }
 
 
@@ -71,6 +202,65 @@ def fetch_data(ticker: str, days: int) -> pd.DataFrame:
         raise ValueError(f"無法取得 {ticker} 資料")
     df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
     return df[["Open","High","Low","Close","Volume"]].dropna()
+
+
+def _fetch_close_series(ticker: str, days: int = 180) -> pd.Series:
+    end   = datetime.today()
+    start = end - timedelta(days=days)
+    df = yf.download(ticker,
+                     start=start.strftime("%Y-%m-%d"),
+                     end=end.strftime("%Y-%m-%d"),
+                     progress=False, auto_adjust=True)
+    if df.empty:
+        raise ValueError(f"無法取得 {ticker} 資料")
+    df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
+    return df["Close"].dropna()
+
+
+def _series_change_pct(series: pd.Series, periods: int) -> float | None:
+    if len(series) <= periods:
+        return None
+    prev = float(series.iloc[-1 - periods])
+    if prev == 0:
+        return None
+    return (float(series.iloc[-1]) - prev) / prev * 100
+
+
+def fetch_market_context() -> dict:
+    """
+    抓取每日會影響台股風險偏好的總體資料。
+    USD/TWD 上升代表美元變貴、台幣轉弱；美債殖利率上升代表估值壓力提高。
+    """
+    context = {"success": True, "fx": None, "rates": None, "errors": []}
+
+    try:
+        fx = _fetch_close_series("TWD=X", 180)
+        context["fx"] = {
+            "ticker": "TWD=X",
+            "label": "美元/台幣",
+            "value": float(fx.iloc[-1]),
+            "chg_5d_pct": _series_change_pct(fx, 5),
+            "chg_20d_pct": _series_change_pct(fx, 20),
+        }
+    except Exception as exc:
+        context["success"] = False
+        context["errors"].append(f"匯率資料失敗:{str(exc)[:80]}")
+
+    try:
+        rates = _fetch_close_series("^TNX", 180)
+        current = float(rates.iloc[-1])
+        context["rates"] = {
+            "ticker": "^TNX",
+            "label": "美國10年期公債殖利率",
+            "value": current,
+            "chg_5d_bp": (current - float(rates.iloc[-6])) * 100 if len(rates) > 5 else None,
+            "chg_20d_bp": (current - float(rates.iloc[-21])) * 100 if len(rates) > 20 else None,
+        }
+    except Exception as exc:
+        context["success"] = False
+        context["errors"].append(f"利率資料失敗:{str(exc)[:80]}")
+
+    return context
 
 
 # ── 計算指標 ────────────────────────────────────────────────
@@ -144,19 +334,19 @@ def eval_bias60(df: pd.DataFrame, scfg: dict) -> dict:
         zone   = "overheated"
         locked = can_lock
         label  = f"🔥 過熱{'鎖定' if can_lock else '警示'}（季線乖離{bias60:.1f}%，歷史{p_high_pct}%分位）"
-        color  = "#c0392b"
+        color  = UP_COLOR
         note   = f"Z={z:.2f}｜超過歷史{p_high_pct}%分位({p_high:.1f}%)｜{'強制禁止買進' if can_lock else '僅警示，不鎖定'}"
     elif bias60 <= p_low:
         zone   = "oversold"
         locked = False
         label  = f"❄️ 超跌部署區（季線乖離{bias60:.1f}%，歷史{p_low_pct}%分位）"
-        color  = "#2980b9"
+        color  = DOWN_COLOR
         note   = f"Z={z:.2f}｜低於歷史{p_low_pct}%分位({p_low:.1f}%)｜統計黃金建倉區"
     else:
         zone   = "normal"
         locked = False
         label  = f"正常範圍（季線乖離{bias60:.1f}%）"
-        color  = "#95a5a6"
+        color  = NEUTRAL_COLOR
         note   = f"Z={z:.2f}｜介於{p_low_pct}%({p_low:.1f}%)～{p_high_pct}%({p_high:.1f}%)分位之間"
 
     return dict(zone=zone, locked=locked, bias60=bias60,
@@ -180,7 +370,7 @@ def calc_pyramid(df: pd.DataFrame, scfg: dict, signal_level: str) -> dict:
     is_consolidating = range_pct < 5.0
     suggestions = []
 
-    if signal_level in ("STRONG_BUY", "WEAK_BUY"):
+    if signal_level.startswith("BUY_"):
         batches = int(abs(drop_pct) / drop_step) if drop_pct < 0 else 0
         if batches == 0:
             suggestions.append(
@@ -200,8 +390,51 @@ def calc_pyramid(df: pd.DataFrame, scfg: dict, signal_level: str) -> dict:
                 range_pct=range_pct, suggestions=suggestions)
 
 
+def score_to_signal(score: float) -> tuple:
+    for threshold, key, label in SIGNAL_LEVELS:
+        if score >= threshold:
+            return key, label
+    return "NEUTRAL", "無訊號"
+
+
+def _direction_style(direction: str, level_key: str, locked: bool = False) -> tuple:
+    if locked:
+        return "🔥", "#fdecea", UP_COLOR
+    if direction == "buy":
+        return {
+            "STRONG": ("🔴", "#fdecea", UP_COLOR),
+            "MID": ("🟠", "#fef5e7", WARN_COLOR),
+            "WEAK": ("🟡", "#fef9e7", "#f39c12"),
+            "NOTICE": ("🔵", "#eaf4fb", INFO_COLOR),
+            "NEUTRAL": ("⚪", "#f8f9fa", NEUTRAL_COLOR),
+        }.get(level_key, ("⚪", "#f8f9fa", NEUTRAL_COLOR))
+    return {
+        "STRONG": ("🟢", "#eafaf1", DOWN_COLOR),
+        "MID": ("🟣", "#f4ecf7", "#8e44ad"),
+        "WEAK": ("🟡", "#f8f9fa", "#7f8c8d"),
+        "NOTICE": ("⚪", "#f8f9fa", NEUTRAL_COLOR),
+        "NEUTRAL": ("⚪", "#f8f9fa", NEUTRAL_COLOR),
+    }.get(level_key, ("⚪", "#f8f9fa", NEUTRAL_COLOR))
+
+
+def format_market_value(value: float, unit: str = "張") -> str:
+    if value > 0:
+        return f'<span style="color:{UP_COLOR};font-weight:bold;">買超 {value:.0f}{unit}</span>'
+    if value < 0:
+        return f'<span style="color:{DOWN_COLOR};font-weight:bold;">賣超 {abs(value):.0f}{unit}</span>'
+    return f'平盤 0{unit}'
+
+
+def format_ratio_value(value: float) -> str:
+    if value > 0:
+        return f'<span style="color:{UP_COLOR};font-weight:bold;">+{value:.2f}%</span>'
+    if value < 0:
+        return f'<span style="color:{DOWN_COLOR};font-weight:bold;">{value:.2f}%</span>'
+    return "0.00%"
+
+
 # ── 評估訊號 ────────────────────────────────────────────────
-def evaluate(df: pd.DataFrame, scfg: dict) -> dict:
+def evaluate(df: pd.DataFrame, scfg: dict, inst: dict | None = None) -> dict:
     thr        = scfg["thresholds"]
     ma         = scfg["ma_periods"]
     use_obv    = scfg.get("use_obv", True)
@@ -442,6 +675,334 @@ def evaluate(df: pd.DataFrame, scfg: dict) -> dict:
     )
 
 
+def evaluate_weighted(df: pd.DataFrame, scfg: dict, inst: dict | None = None,
+                      macro: dict | None = None) -> dict:
+    thr = scfg["thresholds"]
+    ma = scfg["ma_periods"]
+    use_obv = scfg.get("use_obv", True)
+    use_vol = scfg.get("use_vol_trend", True)
+    use_inst = scfg.get("use_institutional", True)
+    use_fx = scfg.get("use_fx", True)
+    use_rates = scfg.get("use_rates", True)
+    macro_sensitivity = scfg.get("macro_sensitivity", "market")
+    lev_warn = scfg.get("leverage_warning", False)
+    s, m, l = ma["short"], ma["mid"], ma["long"]
+
+    latest = df.iloc[-1]
+    prev = df.iloc[-2]
+
+    close = float(latest["Close"])
+    prev_close = float(prev["Close"])
+    ma_s = float(latest[f"MA{s}"])
+    ma_m = float(latest[f"MA{m}"])
+    ma_l = float(latest[f"MA{l}"])
+    ma_s_prev = float(prev[f"MA{s}"])
+    ma_m_prev = float(prev[f"MA{m}"])
+    ma_l_prev = float(prev[f"MA{l}"])
+    k, d = float(latest["K"]), float(latest["D"])
+    kp, dp = float(prev["K"]), float(prev["D"])
+    hist = float(latest["MACD_hist"])
+    hist_p = float(prev["MACD_hist"])
+    bias20 = float(latest["Bias20"])
+    vol = float(latest["Volume"])
+    vol_ma = float(latest["Vol_MA"])
+    vol_trend = float(latest["Vol_Trend"])
+    obv = float(latest["OBV"])
+    obv_ma = float(latest["OBV_MA"])
+    obv_prev = float(prev["OBV"])
+
+    items = []
+    buy_score = 0.0
+    sell_score = 0.0
+    max_possible = float(sum(WEIGHTS.values()))
+
+    def add_item(label, value, color, note, buy=0.0, sell=0.0):
+        nonlocal buy_score, sell_score
+        buy_score += buy
+        sell_score += sell
+        if buy or sell:
+            note = f"{note}｜分數影響:買進+{buy:.0f}/賣出+{sell:.0f}"
+        items.append((label, value, color, note))
+
+    if lev_warn:
+        add_item("⚠️ 槓桿警示", "每日重置ETF，不適合長抱", "#e67e22",
+                 "槓桿ETF有長期耗損效應，僅適合短線波段操作")
+
+    b60 = eval_bias60(df, scfg)
+    add_item("BIAS60 Z-Score", b60["label"], b60["color"],
+             b60["note"] + "｜用途:判斷中期位置是否過熱或超跌；過熱時不建議追買")
+
+    ma_s_dir = ma_s > ma_s_prev
+    above_ma_s = close > ma_s
+    if ma_m > ma_l and above_ma_s and ma_s_dir:
+        trend = "healthy_bull"
+        trend_label, trend_color = "多頭健康", UP_COLOR
+        trend_buy, trend_sell = WEIGHTS["trend"], 0
+    elif ma_m > ma_l and (not above_ma_s or not ma_s_dir):
+        trend = "weak_bull"
+        trend_label, trend_color = "多頭轉弱", "#f39c12"
+        trend_buy, trend_sell = 0, WEIGHTS["trend"] * 0.4
+    elif ma_m < ma_l:
+        trend = "bear"
+        trend_label, trend_color = "空頭確認", DOWN_COLOR
+        trend_buy, trend_sell = 0, WEIGHTS["trend"]
+    else:
+        trend = "neutral"
+        trend_label, trend_color = "方向不明", NEUTRAL_COLOR
+        trend_buy = trend_sell = 0
+    add_item(
+        "趨勢環境", trend_label, trend_color,
+        f"MA{s}={ma_s:.1f}｜MA{m}={ma_m:.1f}｜MA{l}={ma_l:.1f}｜"
+        f"收盤{'站上' if above_ma_s else '跌破'}{s}日線（{s}日線{'向上' if ma_s_dir else '向下'}）｜"
+        f"趨勢代表目前市場主方向，是本模型最重要的判斷項目｜均線交叉已包含在趨勢判斷中，不重複加分",
+        trend_buy, trend_sell,
+    )
+
+    if use_fx:
+        fx = macro.get("fx") if macro else None
+        if fx:
+            fx_5d = fx.get("chg_5d_pct")
+            fx_20d = fx.get("chg_20d_pct")
+            fx_value = fx["value"]
+            fx_note = (
+                f"美元/台幣={fx_value:.3f}｜5日變動={fx_5d:+.2f}%｜20日變動={fx_20d:+.2f}%｜"
+                "數字變高代表美元變貴、台幣轉弱；台幣快速貶值常伴隨外資撤出壓力，"
+                "但對台積電、聯發科等出口股有部分匯兌抵銷"
+            )
+            exporter = macro_sensitivity == "exporter"
+            full = WEIGHTS["fx"] * (0.75 if exporter else 1.0)
+            half = full * 0.5
+            if fx_5d is not None and fx_20d is not None and (fx_5d >= 1.0 or fx_20d >= 2.0):
+                add_item("美元/台幣匯率", "台幣明顯轉弱 ⚠️", "#e67e22", fx_note, 0, full)
+            elif fx_5d is not None and fx_20d is not None and (fx_5d <= -1.0 or fx_20d <= -2.0):
+                add_item("美元/台幣匯率", "台幣明顯轉強 ✅", UP_COLOR, fx_note, full, 0)
+            elif fx_5d is not None and fx_20d is not None and (fx_5d >= 0.5 or fx_20d >= 1.0):
+                add_item("美元/台幣匯率", "台幣偏弱", "#f39c12", fx_note, 0, half)
+            elif fx_5d is not None and fx_20d is not None and (fx_5d <= -0.5 or fx_20d <= -1.0):
+                add_item("美元/台幣匯率", "台幣偏強", "#3498db", fx_note, half, 0)
+            else:
+                add_item("美元/台幣匯率", "匯率中性", NEUTRAL_COLOR, fx_note)
+        else:
+            reason = "；".join(macro.get("errors", [])) if macro else "未取得總體資料"
+            add_item("美元/台幣匯率", "資料暫不可用", "#bdc3c7",
+                     f"{reason}｜不計分，避免資料源異常影響判斷")
+    else:
+        add_item("美元/台幣匯率", "已關閉", "#bdc3c7", "此標的不使用匯率權重")
+
+    if use_rates:
+        rates = macro.get("rates") if macro else None
+        if rates:
+            rate_value = rates["value"]
+            bp_5d = rates.get("chg_5d_bp")
+            bp_20d = rates.get("chg_20d_bp")
+            rate_note = (
+                f"美國10年期殖利率={rate_value:.2f}%｜5日變動={bp_5d:+.0f}bp｜20日變動={bp_20d:+.0f}bp｜"
+                "殖利率上升會提高股市折現率，通常壓抑科技股評價；殖利率下行則有利成長股估值修復"
+            )
+            if bp_5d is not None and bp_20d is not None and (bp_5d >= 10 or bp_20d >= 20):
+                add_item("利率環境", "殖利率快速上升 ⚠️", DOWN_COLOR, rate_note, 0, WEIGHTS["rates"])
+            elif bp_5d is not None and bp_20d is not None and (bp_5d <= -10 or bp_20d <= -20):
+                add_item("利率環境", "殖利率明顯下行 ✅", UP_COLOR, rate_note, WEIGHTS["rates"], 0)
+            elif bp_5d is not None and bp_20d is not None and (bp_5d >= 5 or bp_20d >= 10):
+                add_item("利率環境", "利率偏上行", "#f39c12", rate_note, 0, WEIGHTS["rates"] * 0.5)
+            elif bp_5d is not None and bp_20d is not None and (bp_5d <= -5 or bp_20d <= -10):
+                add_item("利率環境", "利率偏下行", "#3498db", rate_note, WEIGHTS["rates"] * 0.5, 0)
+            else:
+                add_item("利率環境", "利率中性", NEUTRAL_COLOR, rate_note)
+        else:
+            reason = "；".join(macro.get("errors", [])) if macro else "未取得總體資料"
+            add_item("利率環境", "資料暫不可用", "#bdc3c7",
+                     f"{reason}｜不計分，避免資料源異常影響判斷")
+    else:
+        add_item("利率環境", "已關閉", "#bdc3c7", "此標的不使用利率權重")
+
+    hist_series = df["MACD_hist"].dropna()
+    hist_p10 = float(hist_series.quantile(0.10))
+    hist_p90 = float(hist_series.quantile(0.90))
+    macd_note = f"當前={hist:.4f}｜歷史正常區間[{hist_p10:.4f}～{hist_p90:.4f}]｜正=多頭動能，負=空頭動能"
+    if hist > 0 and hist_p <= 0:
+        add_item("MACD", "柱狀由負翻正 ✅", UP_COLOR, macd_note + "｜剛翻正，動能轉強", WEIGHTS["macd"], 0)
+    elif hist < 0 and hist_p >= 0:
+        add_item("MACD", "柱狀由正翻負 ⚠️", DOWN_COLOR, macd_note + "｜剛翻負，動能轉弱", 0, WEIGHTS["macd"])
+    elif hist > 0 and hist > hist_p:
+        add_item("MACD", "多頭動能延續", UP_COLOR, macd_note + "｜動能仍改善", WEIGHTS["macd"] * 0.5, 0)
+    elif hist < 0 and hist < hist_p:
+        add_item("MACD", "空頭動能延續", DOWN_COLOR, macd_note + "｜動能仍惡化", 0, WEIGHTS["macd"] * 0.5)
+    else:
+        sign = "正（多頭）" if hist > 0 else "負（空頭）"
+        add_item("MACD", f"柱狀持續為{sign}", NEUTRAL_COLOR, macd_note)
+
+    avg_vol20 = float(df["Volume"].tail(20).mean())
+    if use_inst:
+        if inst and inst.get("success"):
+            total_net = float(inst["total_net"])
+            net_ratio = total_net / avg_vol20 * 100 if avg_vol20 > 0 else 0.0
+            nets = [inst["foreign_net"], inst["invest_net"], inst["dealer_net"]]
+            buy_breadth = sum(1 for n in nets if n > 0)
+            sell_breadth = sum(1 for n in nets if n < 0)
+            inst_note = (
+                f"資料日={inst['date']}｜"
+                f"外資 {format_market_value(inst['foreign_net']/1000)}｜"
+                f"投信 {format_market_value(inst['invest_net']/1000)}｜"
+                f"自營 {format_market_value(inst['dealer_net']/1000)}｜"
+                f"合計 {format_market_value(total_net/1000)}｜"
+                f"占20日均量 {format_ratio_value(net_ratio)}"
+            )
+            if net_ratio >= 5 and buy_breadth >= 2:
+                add_item("三大法人", "法人明顯買超 ✅", UP_COLOR, inst_note, WEIGHTS["institutional"], 0)
+            elif net_ratio <= -5 and sell_breadth >= 2:
+                add_item("三大法人", "法人明顯賣超 ⚠️", DOWN_COLOR, inst_note, 0, WEIGHTS["institutional"])
+            elif net_ratio > 1 or buy_breadth >= 2:
+                add_item("三大法人", "法人偏買", UP_COLOR, inst_note, WEIGHTS["institutional"] * 0.5, 0)
+            elif net_ratio < -1 or sell_breadth >= 2:
+                add_item("三大法人", "法人偏賣", DOWN_COLOR, inst_note, 0, WEIGHTS["institutional"] * 0.5)
+            else:
+                add_item("三大法人", "籌碼中性", NEUTRAL_COLOR, inst_note)
+        else:
+            reason = inst.get("error", "未取得資料") if inst else "未取得資料"
+            add_item("三大法人", "資料暫不可用", "#bdc3c7",
+                     f"{reason}｜不計分，避免資料源異常影響整體判斷")
+    else:
+        add_item("三大法人", "已關閉（此標的不適用）", "#bdc3c7",
+                 "此標的無法直接使用個股三大法人買賣超，避免用錯資料來源")
+
+    kd_buy = k > d and kp <= dp and k < thr["kd_buy"]
+    kd_sell = k < d and kp >= dp and k > thr["kd_sell"]
+    kd_note = (
+        f"當前 K={k:.1f} D={d:.1f}｜買進區:K<{thr['kd_buy']}且K上穿D｜"
+        f"賣出區:K>{thr['kd_sell']}且K下穿D｜KD適合抓時機，但容易鈍化"
+    )
+    if kd_buy:
+        add_item("KD", "低檔黃金交叉 ✅", UP_COLOR, kd_note, WEIGHTS["kd"], 0)
+    elif kd_sell:
+        add_item("KD", "高檔死亡交叉 ⚠️", DOWN_COLOR, kd_note, 0, WEIGHTS["kd"])
+    elif k > d and k < 50:
+        add_item("KD", "低檔轉強但未交叉", "#3498db", kd_note, WEIGHTS["kd"] * 0.4, 0)
+    elif k < d and k > 50:
+        add_item("KD", "高檔轉弱但未交叉", "#f39c12", kd_note, 0, WEIGHTS["kd"] * 0.4)
+    else:
+        add_item("KD", "無交叉訊號", NEUTRAL_COLOR, kd_note)
+
+    ma_bull = ma_m > ma_l and ma_m_prev <= ma_l_prev
+    ma_bear = ma_m < ma_l and ma_m_prev >= ma_l_prev
+    ma_note = (
+        f"MA{s}={ma_s:.1f}｜MA{m}={ma_m:.1f}｜MA{l}={ma_l:.1f}｜"
+        f"這項只說明均線是否剛轉向；分數已在趨勢環境反映，不另外加分"
+    )
+    if ma_bull:
+        add_item("均線交叉", f"MA{m}上穿MA{l} ✅", UP_COLOR, ma_note)
+    elif ma_bear:
+        add_item("均線交叉", f"MA{m}下穿MA{l} ⚠️", DOWN_COLOR, ma_note)
+    else:
+        status = "多頭排列持續" if ma_m > ma_l else "空頭排列持續"
+        add_item("均線交叉", status, NEUTRAL_COLOR, ma_note)
+
+    vol_ratio = vol / vol_ma if vol_ma > 0 else 1
+    if use_vol:
+        vol_note = (
+            f"今日成交量/{thr['vol_ma_period']}日均量={vol_ratio:.2f}倍｜"
+            f"量能是確認項，權重較低"
+        )
+        if vol_trend > 0 and vol_ratio > 1.2 and close > prev_close:
+            add_item("量能趨勢", "價漲量增 ✅", UP_COLOR, vol_note, WEIGHTS["vol"], 0)
+        elif vol_trend > 0 and vol_ratio > 1.2 and close < prev_close:
+            add_item("量能趨勢", "價跌量增 ⚠️", DOWN_COLOR, vol_note, 0, WEIGHTS["vol"])
+        elif vol_trend < 0 and vol_ratio < 0.8 and close < prev_close:
+            add_item("量能趨勢", "價跌量縮", "#f39c12", vol_note, 0, WEIGHTS["vol"] * 0.4)
+        else:
+            add_item("量能趨勢", "量能平穩", NEUTRAL_COLOR, vol_note)
+    else:
+        add_item("量能趨勢", "已關閉（此標的不適用）", "#bdc3c7",
+                 "此標的成交量資料不適合直接作為多空分數")
+
+    if use_obv:
+        obv_rising = obv > obv_ma and obv > obv_prev
+        obv_falling = obv < obv_ma and obv < obv_prev
+        price_up = close > prev_close
+        obv_note = (
+            f"OBV={'高於' if obv > obv_ma else '低於'}{thr['obv_ma_period']}日均線｜"
+            f"OBV可觀察量價累積，但雜訊高於趨勢與MACD"
+        )
+        if obv_rising and price_up:
+            add_item("OBV", "量價齊揚 ✅", UP_COLOR, obv_note, WEIGHTS["obv"], 0)
+        elif obv_rising and not price_up:
+            add_item("OBV", "OBV領先價格 💡", "#3498db", obv_note, WEIGHTS["obv"] * 0.5, 0)
+        elif obv_falling and not price_up:
+            add_item("OBV", "量價齊跌 ⚠️", DOWN_COLOR, obv_note, 0, WEIGHTS["obv"])
+        elif obv_falling and price_up:
+            add_item("OBV", "價漲量縮背離 ⚠️", "#f39c12", obv_note, 0, WEIGHTS["obv"] * 0.5)
+        else:
+            add_item("OBV", "OBV中性", NEUTRAL_COLOR, obv_note)
+    else:
+        add_item("OBV", "已關閉（此標的不適用）", "#bdc3c7",
+                 "此標的成交量結構不適合用OBV作為主要判斷")
+
+    is_red = close > float(latest["Open"])
+    open_p = float(latest["Open"])
+    chg_pct = (close - open_p) / open_p * 100
+    price_note = (
+        f"開盤={open_p:.2f}｜收盤={close:.2f}｜當日漲跌={chg_pct:+.2f}%｜"
+        f"只用來輔助理解今天盤勢，不直接加分"
+    )
+    add_item("價格行為",
+             f"紅K（+{chg_pct:.2f}%）" if is_red else f"黑K（{chg_pct:.2f}%）",
+             UP_COLOR if is_red else DOWN_COLOR, price_note)
+
+    effective_buy = 0.0 if b60["locked"] else buy_score
+    effective_sell = sell_score
+    if b60["locked"]:
+        level_key, level_label = score_to_signal(effective_sell)
+        level, emoji = f"OVERHEATED_{level_key}", "🔥"
+        if effective_sell >= 15:
+            summary = f"過熱鎖定｜賣出{level_label}({effective_sell:.0f}/{max_possible:.0f}分)"
+        else:
+            summary = "過熱鎖定｜禁止追買"
+        advice = (
+            f"季線乖離{b60['bias60']:.1f}%超過歷史門檻，"
+            f"原始買進分數{buy_score:.0f}分僅供參考，實際買進分數歸零"
+        )
+        bg, border = "#fdecea", UP_COLOR
+    elif effective_buy >= effective_sell:
+        score = effective_buy
+        level_key, level_label = score_to_signal(score)
+        emoji, bg, border = _direction_style("buy", level_key)
+        level = f"BUY_{level_key}"
+        prefix = "超跌買進" if b60["zone"] == "oversold" and score >= 15 else "買進"
+        summary = f"{emoji} {prefix}{level_label}({score:.0f}/{max_possible:.0f}分)"
+        advice = {
+            "STRONG": "多項高權重指標共振，可依金字塔計畫分批執行",
+            "MID": "訊號有一定一致性，可考慮小部位或分批試單",
+            "WEAK": "值得關注，但仍需等待更多確認",
+            "NOTICE": "微弱買進跡象，僅列入觀察",
+            "NEUTRAL": "買進依據不足，繼續觀察",
+        }[level_key]
+    else:
+        score = effective_sell
+        level_key, level_label = score_to_signal(score)
+        emoji, bg, border = _direction_style("sell", level_key)
+        level = f"SELL_{level_key}"
+        summary = f"{emoji} 賣出{level_label}({score:.0f}/{max_possible:.0f}分)"
+        advice = {
+            "STRONG": "多項高權重風險指標共振，應優先控管部位風險",
+            "MID": "賣出訊號有一定一致性，持有者應提高警覺",
+            "WEAK": "風險升溫，可檢查停損或降低追價",
+            "NOTICE": "微弱賣出跡象，僅列入觀察",
+            "NEUTRAL": "賣出依據不足，繼續觀察",
+        }[level_key]
+
+    pyramid = calc_pyramid(df, scfg, level)
+
+    return dict(
+        level=level, emoji=emoji, summary=summary, advice=advice,
+        bg=bg, border=border, items=items,
+        close=close, bias20=bias20, is_red=is_red,
+        buy_score=buy_score, sell_score=sell_score,
+        effective_buy=effective_buy, effective_sell=effective_sell,
+        score_note="季線乖離過熱，買進分數已鎖定" if b60["locked"] else "",
+        max_possible=max_possible, b60=b60, pyramid=pyramid,
+    )
+
+
 # ── 產生單檔 HTML 區塊 ───────────────────────────────────────
 def stock_html_block(name: str, ticker: str, result: dict, note: str = "") -> str:
     rows = ""
@@ -456,11 +1017,11 @@ def stock_html_block(name: str, ticker: str, result: dict, note: str = "") -> st
         bg_row = "#fafafa" if idx % 2 == 0 else "#ffffff"
         rows += (
             f'<tr style="background:{bg_row};border-bottom:1px solid #eee;">'
-            f'<td style="padding:8px 10px;color:#555;width:120px;font-size:13px;'
-            f'font-weight:bold;vertical-align:top;white-space:nowrap;">{label}</td>'
+            f'<td style="padding:10px 12px;color:#555;width:22%;font-size:13px;'
+            f'font-weight:bold;vertical-align:top;line-height:1.5;">{label}</td>'
             f'<td style="padding:8px 10px;font-weight:bold;color:{color};'
-            f'font-size:13px;vertical-align:top;white-space:nowrap;width:160px;">{value}</td>'
-            f'<td style="padding:8px 10px;color:#666;font-size:12px;'
+            f'font-size:13px;vertical-align:top;line-height:1.5;width:25%;">{value}</td>'
+            f'<td style="padding:10px 12px;color:#666;font-size:12px;'
             f'line-height:1.6;vertical-align:top;">{note_items}</td>'
             f'</tr>'
         )
@@ -504,40 +1065,308 @@ def stock_html_block(name: str, ticker: str, result: dict, note: str = "") -> st
 
 # ── 產生總覽表格 ─────────────────────────────────────────────
 def summary_table(results: list) -> str:
-    rows = ""
+    cards = ""
     for name, ticker, r in results:
         badge = ""
         if r["b60"]["zone"] == "overheated":
             badge = (' <span style="background:#c0392b;color:#fff;'
-                     'font-size:10px;padding:2px 6px;border-radius:4px;">🔥過熱</span>')
+                     'font-size:11px;padding:3px 7px;border-radius:4px;display:inline-block;margin-left:6px;white-space:nowrap;">過熱</span>')
         elif r["b60"]["zone"] == "oversold":
             badge = (' <span style="background:#2980b9;color:#fff;'
-                     'font-size:10px;padding:2px 6px;border-radius:4px;">❄️超跌</span>')
-        rows += (f'<tr style="border-bottom:1px solid #eee;">'
-                 f'<td style="padding:8px 12px;">{name}{badge}</td>'
-                 f'<td style="padding:8px 12px;color:#777;">'
-                 f'{ticker.replace(".TW","").replace(".tw","")}</td>'
-                 f'<td style="padding:8px 12px;font-weight:bold;">{r["close"]:.2f}</td>'
-                 f'<td style="padding:8px 12px;font-size:18px;">{r["emoji"]}</td>'
-                 f'<td style="padding:8px 12px;font-weight:bold;color:{r["border"]};">{r["summary"]}</td>'
-                 f'<td style="padding:8px 12px;color:#777;font-size:12px;">'
-                 f'BIAS60={r["b60"]["bias60"]:.1f}%</td>'
-                 f'</tr>')
-    return (f'<table style="width:100%;border-collapse:collapse;margin-bottom:28px;'
-            f'border:1px solid #ddd;border-radius:8px;overflow:hidden;">'
-            f'<thead><tr style="background:#2c3e50;color:#fff;">'
-            f'<th style="padding:10px 12px;text-align:left;">股票名稱</th>'
-            f'<th style="padding:10px 12px;text-align:left;">代號</th>'
-            f'<th style="padding:10px 12px;text-align:left;">收盤價</th>'
-            f'<th style="padding:10px 12px;text-align:left;">訊號</th>'
-            f'<th style="padding:10px 12px;text-align:left;">說明</th>'
-            f'<th style="padding:10px 12px;text-align:left;">季線乖離</th>'
-            f'</tr></thead><tbody>{rows}</tbody></table>')
+                     'font-size:11px;padding:3px 7px;border-radius:4px;display:inline-block;margin-left:6px;white-space:nowrap;">超跌</span>')
+        score_text = (
+            f'實際參考：買進 {r.get("effective_buy", 0):.0f} / 賣出 {r.get("effective_sell", 0):.0f}'
+            f'<br><span style="color:#999;">背景分數：買進 {r.get("buy_score", 0):.0f} / 賣出 {r.get("sell_score", 0):.0f}'
+            f'｜季線乖離 {r["b60"]["bias60"]:.1f}%</span>'
+        )
+        if r.get("score_note"):
+            score_text += f'<br><span style="color:#c0392b;">{r["score_note"]}</span>'
+        code = ticker.replace(".TW", "").replace(".tw", "")
+        cards += (
+            f'<div style="border:1px solid #ddd;border-left:5px solid {r["border"]};'
+            f'border-radius:8px;padding:12px 14px;margin-bottom:12px;background:#fff;">'
+            f'<div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">'
+            f'<div style="min-width:0;">'
+            f'<div style="font-size:16px;font-weight:bold;color:#2c3e50;line-height:1.4;">{name}{badge}</div>'
+            f'<div style="font-size:12px;color:#888;margin-top:2px;">代號 {code}</div>'
+            f'</div>'
+            f'<div style="text-align:right;white-space:nowrap;">'
+            f'<div style="font-size:11px;color:#888;">收盤價</div>'
+            f'<div style="font-size:18px;font-weight:bold;color:#2c3e50;">{r["close"]:.2f}</div>'
+            f'</div></div>'
+            f'<div style="margin-top:10px;font-weight:bold;color:{r["border"]};font-size:15px;line-height:1.5;">'
+            f'{r["summary"]}</div>'
+            f'<div style="margin-top:6px;color:#555;font-size:13px;line-height:1.6;">{r["advice"]}</div>'
+            f'<div style="margin-top:8px;color:#666;font-size:12px;line-height:1.7;background:#fafafa;'
+            f'border-radius:6px;padding:8px 10px;">{score_text}</div>'
+            f'</div>'
+        )
+    return f'<div style="margin-bottom:28px;">{cards}</div>'
+
+
+def market_context_html(macro: dict | None) -> str:
+    if not macro:
+        return ""
+
+    fx = macro.get("fx")
+    rates = macro.get("rates")
+    fx_html = ""
+    rates_html = ""
+
+    if fx:
+        fx_html = (
+            f'<div style="padding:10px 12px;border-bottom:1px solid #eee;">'
+            f'<strong>美元/台幣</strong>：{fx["value"]:.3f}｜'
+            f'5日 {fx["chg_5d_pct"]:+.2f}%｜20日 {fx["chg_20d_pct"]:+.2f}%'
+            f'<div style="color:#777;font-size:12px;margin-top:3px;">'
+            f'數字變高代表台幣轉弱；短線通常提高外資撤出與台股修正風險，但出口股有部分匯兌抵銷。</div></div>'
+        )
+
+    if rates:
+        rates_html = (
+            f'<div style="padding:10px 12px;">'
+            f'<strong>美國10年期公債殖利率</strong>：{rates["value"]:.2f}%｜'
+            f'5日 {rates["chg_5d_bp"]:+.0f}bp｜20日 {rates["chg_20d_bp"]:+.0f}bp'
+            f'<div style="color:#777;font-size:12px;margin-top:3px;">'
+            f'殖利率上升通常壓抑科技股評價；殖利率下行則有利成長股估值修復。</div></div>'
+        )
+
+    if not fx_html and not rates_html:
+        errors = "；".join(macro.get("errors", [])) or "未取得總體資料"
+        return (f'<div style="background:#fff3cd;border:1px solid #ffeeba;'
+                f'padding:10px 12px;border-radius:6px;margin-bottom:18px;'
+                f'font-size:12px;color:#856404;">總體資料暫不可用：{errors}</div>')
+
+    return (
+        f'<h3 style="color:#2c3e50;border-bottom:2px solid #2c3e50;padding-bottom:6px;">總體環境</h3>'
+        f'<div style="border:1px solid #ddd;border-radius:8px;overflow:hidden;margin-bottom:28px;">'
+        f'{fx_html}{rates_html}</div>'
+    )
+
+
+def _classify_news_item(title: str) -> tuple:
+    text = title.lower()
+    high_keywords = ["戰爭", "開戰", "伊朗", "美伊", "霍爾木茲", "關稅", "晶片管制", "fomc", "fed", "川習", "習近平", "trump", "xi"]
+    mid_keywords = ["原油", "油價", "利率", "殖利率", "匯率", "台積電", "tsmc", "nvidia", "ai", "半導體", "外資", "營收", "法說"]
+
+    if any(k in text for k in high_keywords):
+        impact = "高"
+    elif any(k in text for k in mid_keywords):
+        impact = "中高"
+    else:
+        impact = "中"
+
+    if any(k in text for k in ["原油", "油價", "中東", "伊朗", "美伊", "霍爾木茲"]):
+        note = "能源與地緣風險會影響通膨、利率預期與科技股評價；油價急漲通常壓抑風險偏好。"
+        scope = "油價、通膨、全球股市、台股風險偏好"
+    elif any(k in text for k in ["fed", "fomc", "利率", "殖利率"]):
+        note = "利率預期會直接影響成長股估值；偏鷹訊息通常壓抑半導體與高本益比族群。"
+        scope = "全球股市、美元、科技股、外資資金流"
+    elif any(k in text for k in ["川習", "美中", "關稅", "晶片管制", "trump", "xi"]):
+        note = "美中談判與晶片政策會影響半導體供應鏈、外資風險偏好與台股權值股評價。"
+        scope = "台股、半導體、匯率、外資風險偏好"
+    elif any(k in text for k in ["台積電", "tsmc", "nvidia", "ai", "半導體", "營收", "法說"]):
+        note = "AI與半導體需求變化會影響台積電、聯發科與加權指數權值股表現。"
+        scope = "台積電、聯發科、半導體供應鏈"
+    else:
+        note = "屬於市場風險偏好觀察項，需搭配價格、籌碼與總體環境判斷。"
+        scope = "台股與全球風險偏好"
+    return impact, scope, note
+
+
+def fetch_auto_news(cfg: dict) -> list:
+    news_cfg = cfg.get("auto_news", {})
+    if not news_cfg.get("enabled", False):
+        return []
+
+    queries = news_cfg.get("queries", [])
+    lookback_days = int(news_cfg.get("lookback_days", 7))
+    max_items = int(news_cfg.get("max_items", 8))
+    min_date = datetime.now().astimezone() - timedelta(days=lookback_days)
+    headers = {"User-Agent": "Mozilla/5.0"}
+    items = []
+    seen = set()
+
+    for query in queries:
+        url = (
+            "https://news.google.com/rss/search?q="
+            f"{quote_plus(query + f' when:{lookback_days}d')}"
+            "&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
+        )
+        try:
+            resp = requests.get(url, headers=headers, timeout=12)
+            resp.raise_for_status()
+            root = ET.fromstring(resp.content)
+        except Exception:
+            continue
+
+        for item in root.findall(".//item"):
+            title = item.findtext("title", "").strip()
+            link = item.findtext("link", "").strip()
+            pub_text = item.findtext("pubDate", "").strip()
+            source = item.findtext("source", "").strip() or "Google News"
+            if not title:
+                continue
+            key = re.sub(r"\s+", "", title.lower())
+            if key in seen:
+                continue
+            try:
+                pub_dt = parsedate_to_datetime(pub_text).astimezone()
+            except Exception:
+                pub_dt = datetime.now().astimezone()
+            if pub_dt < min_date:
+                continue
+            impact, scope, note = _classify_news_item(title)
+            seen.add(key)
+            items.append({
+                "date": pub_dt.strftime("%Y-%m-%d"),
+                "title": title,
+                "impact": impact,
+                "scope": scope,
+                "note": note,
+                "source": source,
+                "link": link,
+            })
+            break
+
+    impact_rank = {"高": 0, "中高": 1, "中": 2, "低": 3}
+    items.sort(key=lambda x: (impact_rank.get(x["impact"], 9), x["date"]), reverse=False)
+    return items[:max_items]
+
+
+def market_events_html(cfg: dict, today: str, news_items: list | None = None) -> str:
+    events = cfg.get("market_events", [])
+    lookahead = int(cfg.get("market_events_lookahead_days", 45))
+    start = datetime.strptime(today, "%Y-%m-%d").date()
+    end = start + timedelta(days=lookahead)
+    scheduled_rows = ""
+    news_rows = ""
+    impact_colors = {"高": "#c0392b", "中高": "#e67e22", "中": "#f39c12", "低": "#7f8c8d"}
+
+    for event in events:
+        try:
+            event_date = datetime.strptime(event["date"], "%Y-%m-%d").date()
+        except Exception:
+            continue
+        if not (start <= event_date <= end):
+            continue
+        color = impact_colors.get(event.get("impact", ""), "#7f8c8d")
+        scheduled_rows += (
+            f'<tr style="border-bottom:1px solid #eee;">'
+            f'<td style="padding:9px 12px;white-space:nowrap;color:#555;">{event["date"]}</td>'
+            f'<td style="padding:9px 12px;font-weight:bold;">{event["title"]}</td>'
+            f'<td style="padding:9px 12px;">'
+            f'<span style="background:{color};color:#fff;font-size:11px;padding:2px 7px;border-radius:4px;white-space:nowrap;display:inline-block;">'
+            f'{event.get("impact", "未評估")}</span></td>'
+            f'<td style="padding:9px 12px;color:#666;font-size:12px;line-height:1.6;">'
+            f'{event.get("scope", "")}｜{event.get("note", "")}'
+            f'<div style="color:#aaa;margin-top:3px;">來源：{event.get("source", "手動維護")}</div></td>'
+            f'</tr>'
+        )
+
+    if not scheduled_rows:
+        scheduled_rows = (f'<tr><td style="padding:10px 12px;color:#777;font-size:12px;" colspan="4">'
+                f'未來 {lookahead} 天內尚未設定重大事件。</td></tr>')
+
+    for item in news_items or []:
+        color = impact_colors.get(item.get("impact", ""), "#7f8c8d")
+        title = html_lib.escape(item.get("title", ""))
+        source = html_lib.escape(item.get("source", "Google News"))
+        link = html_lib.escape(item.get("link", ""))
+        linked_title = f'<a href="{link}" style="color:#2c3e50;text-decoration:none;">{title}</a>' if link else title
+        news_rows += (
+            f'<tr style="border-bottom:1px solid #eee;">'
+            f'<td style="padding:9px 12px;white-space:nowrap;color:#555;">{item.get("date", "")}</td>'
+            f'<td style="padding:9px 12px;font-weight:bold;">{linked_title}</td>'
+            f'<td style="padding:9px 12px;">'
+            f'<span style="background:{color};color:#fff;font-size:11px;padding:2px 7px;border-radius:4px;white-space:nowrap;display:inline-block;">'
+            f'{item.get("impact", "未評估")}</span></td>'
+            f'<td style="padding:9px 12px;color:#666;font-size:12px;line-height:1.6;">'
+            f'{item.get("scope", "")}｜{item.get("note", "")}'
+            f'<div style="color:#aaa;margin-top:3px;">來源：{source}</div></td>'
+            f'</tr>'
+        )
+
+    if not news_rows:
+        news_rows = (f'<tr><td style="padding:10px 12px;color:#777;font-size:12px;" colspan="4">'
+                     f'近 {cfg.get("auto_news", {}).get("lookback_days", 7)} 天未抓到符合條件的高關聯新聞。</td></tr>')
+
+    return (
+        f'<h3 style="color:#2c3e50;border-bottom:2px solid #2c3e50;padding-bottom:6px;">消息面與重大行事曆</h3>'
+        f'<div style="font-size:12px;color:#777;margin:-12px 0 10px;">'
+        f'固定行事曆負責未來日期；自動新聞掃描負責近期突發事件，例如油價、戰爭、美中、Fed與半導體新聞。</div>'
+        f'<div style="font-weight:bold;color:#2c3e50;margin:4px 0 6px;">固定重大行事曆</div>'
+        f'<table style="width:100%;border-collapse:collapse;margin-bottom:28px;'
+        f'border:1px solid #ddd;border-radius:8px;overflow:hidden;">'
+        f'<thead><tr style="background:#34495e;color:#fff;">'
+        f'<th style="padding:10px 12px;text-align:left;">日期</th>'
+        f'<th style="padding:10px 12px;text-align:left;">事件</th>'
+        f'<th style="padding:10px 12px;text-align:left;">影響</th>'
+        f'<th style="padding:10px 12px;text-align:left;">可能影響</th>'
+        f'</tr></thead><tbody>{scheduled_rows}</tbody></table>'
+        f'<div style="font-weight:bold;color:#2c3e50;margin:4px 0 6px;">近期自動新聞掃描</div>'
+        f'<table style="width:100%;border-collapse:collapse;margin-bottom:28px;'
+        f'border:1px solid #ddd;border-radius:8px;overflow:hidden;">'
+        f'<thead><tr style="background:#566573;color:#fff;">'
+        f'<th style="padding:10px 12px;text-align:left;">日期</th>'
+        f'<th style="padding:10px 12px;text-align:left;">新聞</th>'
+        f'<th style="padding:10px 12px;text-align:left;">影響</th>'
+        f'<th style="padding:10px 12px;text-align:left;">可能影響</th>'
+        f'</tr></thead><tbody>{news_rows}</tbody></table>'
+    )
+
+
+def scoring_rules_html() -> str:
+    weights = [
+        ("趨勢方向", WEIGHTS["trend"], "市場主方向"),
+        ("MACD動能", WEIGHTS["macd"], "漲跌動能"),
+        ("三大法人", WEIGHTS["institutional"], "法人籌碼"),
+        ("KD", WEIGHTS["kd"], "進出場時機"),
+        ("OBV", WEIGHTS["obv"], "量價配合"),
+        ("台幣匯率", WEIGHTS["fx"], "台幣強弱影響外資流向與出口股獲利"),
+        ("美國利率", WEIGHTS["rates"], "利率升降影響科技股評價"),
+        ("量能", WEIGHTS["vol"], "成交確認"),
+    ]
+    weight_rows = "".join(
+        f'<tr style="border-bottom:1px solid #eee;">'
+        f'<td style="padding:7px 9px;font-weight:bold;color:#2c3e50;">{name}</td>'
+        f'<td style="padding:7px 9px;text-align:right;color:#c0392b;font-weight:bold;">{score}</td>'
+        f'<td style="padding:7px 9px;color:#777;font-size:12px;">{meaning}</td>'
+        f'</tr>'
+        for name, score, meaning in weights
+    )
+    return (
+        f'<div style="background:#f7fbff;border:1px solid #cfe2f3;border-radius:8px;'
+        f'padding:14px 16px;margin-bottom:22px;">'
+        f'<div style="font-weight:bold;color:#1f4e79;font-size:15px;margin-bottom:8px;">評分怎麼看</div>'
+        f'<div style="font-size:13px;color:#555;line-height:1.7;margin-bottom:12px;">'
+        f'系統會分別計算買進與賣出分數，最後以「實際參考分」作為主要判斷。'
+        f'若季線乖離過熱，買進分數會被歸零，只保留背景分數讓你知道原本有哪些條件偏多。</div>'
+        f'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">'
+        f'<span style="background:#eef5fb;border:1px solid #d6eaf8;border-radius:6px;padding:5px 8px;font-size:12px;white-space:nowrap;display:inline-block;">提醒 15-29</span>'
+        f'<span style="background:#fef9e7;border:1px solid #f9e79f;border-radius:6px;padding:5px 8px;font-size:12px;white-space:nowrap;display:inline-block;">弱 30-49</span>'
+        f'<span style="background:#fef5e7;border:1px solid #fad7a0;border-radius:6px;padding:5px 8px;font-size:12px;white-space:nowrap;display:inline-block;">中 50-69</span>'
+        f'<span style="background:#fdecea;border:1px solid #f5b7b1;border-radius:6px;padding:5px 8px;font-size:12px;white-space:nowrap;display:inline-block;">強 70+</span>'
+        f'</div>'
+        f'<table style="width:100%;border-collapse:collapse;background:#fff;border:1px solid #e5eef7;'
+        f'border-radius:6px;overflow:hidden;">'
+        f'<thead><tr style="background:#eaf4fb;color:#1f4e79;">'
+        f'<th style="padding:8px 9px;text-align:left;">指標</th>'
+        f'<th style="padding:8px 9px;text-align:right;">分數</th>'
+        f'<th style="padding:8px 9px;text-align:left;">用途</th>'
+        f'</tr></thead><tbody>{weight_rows}</tbody></table>'
+        f'<div style="font-size:12px;color:#777;line-height:1.6;margin-top:10px;">'
+        f'BIAS60 用來判斷中期過熱或超跌，不直接加分；過熱時會鎖住買進，避免追高。</div>'
+        f'</div>'
+    )
 
 
 # ── 組裝 HTML Email ──────────────────────────────────────────
-def build_email_html(results: list, today: str) -> str:
+def build_email_html(results: list, today: str, cfg: dict | None = None,
+                     macro: dict | None = None, news_items: list | None = None) -> str:
     overview = summary_table(results)
+    events_block = market_events_html(cfg or {}, today, news_items)
+    rules_block = scoring_rules_html()
     details  = "".join(
         stock_html_block(n, t, r, note=r.get("stock_note",""))
         for n, t, r in results)
@@ -550,6 +1379,8 @@ def build_email_html(results: list, today: str) -> str:
             f'<p style="margin:6px 0 0;opacity:.8;">{today}｜收盤後分析</p></div>'
             f'<div style="background:#fff;padding:24px;border-radius:0 0 10px 10px;'
             f'box-shadow:0 2px 8px rgba(0,0,0,.08);">'
+            f'{rules_block}'
+            f'{events_block}'
             f'<h3 style="color:#2c3e50;border-bottom:2px solid #2c3e50;padding-bottom:6px;">今日總覽</h3>'
             f'{overview}'
             f'<h3 style="color:#2c3e50;border-bottom:2px solid #2c3e50;padding-bottom:6px;">各股詳細指標</h3>'
@@ -558,6 +1389,13 @@ def build_email_html(results: list, today: str) -> str:
             f'border-top:1px solid #eee;padding-top:12px;margin-top:8px;">'
             f'⚠️ 本報告由自動化程式產生，僅供參考，不構成投資建議。</p>'
             f'</div></body></html>')
+
+
+# ── 本機 HTML 預覽 ───────────────────────────────────────────
+def save_email_preview(html: str) -> Path:
+    preview_path = Path(__file__).parent / "email_preview.html"
+    preview_path.write_text(html, encoding="utf-8")
+    return preview_path
 
 
 # ── 發送 Email ───────────────────────────────────────────────
@@ -581,8 +1419,21 @@ def send_email(cfg: dict, html: str, today: str) -> bool:
 # ── 主流程 ───────────────────────────────────────────────────
 def main():
     cfg   = load_config()
-    today = datetime.today().strftime("%Y/%m/%d")
+    today = datetime.today().strftime("%Y-%m-%d")
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] 開始分析，共 {len(cfg['watchlist'])} 檔")
+
+    macro = fetch_market_context()
+    if macro.get("fx"):
+        print(f"  總體環境：美元/台幣 {macro['fx']['value']:.3f}", end="")
+    if macro.get("rates"):
+        print(f"｜美10年債 {macro['rates']['value']:.2f}%", end="")
+    if macro.get("fx") or macro.get("rates"):
+        print()
+    elif macro.get("errors"):
+        print(f"  總體環境資料暫不可用：{'；'.join(macro['errors'])}")
+
+    news_items = fetch_auto_news(cfg)
+    print(f"  自動新聞掃描：取得 {len(news_items)} 則高關聯新聞")
 
     results = []
     for stock in cfg["watchlist"]:
@@ -594,10 +1445,16 @@ def main():
             scfg = get_stock_cfg(stock, cfg)
             df   = fetch_data(ticker, cfg["lookback_days"])
             df   = calc_indicators(df, scfg)
-            r    = evaluate(df, scfg)
+            inst = fetch_institutional(ticker) if scfg.get("use_institutional", True) else None
+            r    = evaluate_weighted(df, scfg, inst, macro)
             r["stock_note"] = note
             results.append((name, ticker, r))
-            print(f"{r['emoji']} {r['summary']} | BIAS60={r['b60']['bias60']:.1f}%")
+            print(
+                f"{r['emoji']} {r['summary']} | "
+                f"有效買{r['effective_buy']:.0f}/賣{r['effective_sell']:.0f} "
+                f"(原始買{r['buy_score']:.0f}/賣{r['sell_score']:.0f}) | "
+                f"BIAS60={r['b60']['bias60']:.1f}%"
+            )
         except Exception as e:
             print(f"❌ {e}")
 
@@ -605,7 +1462,10 @@ def main():
         print("所有分析失敗，中止")
         return
 
-    html = build_email_html(results, today)
+    html = build_email_html(results, today, cfg, macro, news_items)
+    preview_path = save_email_preview(html)
+    print(f"\n已產生 Email 預覽：{preview_path}")
+
     print(f"\n發送 Email 至 {cfg['email']['to']} ...")
     try:
         if send_email(cfg, html, today):
