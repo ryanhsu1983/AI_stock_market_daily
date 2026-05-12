@@ -51,6 +51,14 @@ SIGNAL_LEVELS = [
     (0, "NEUTRAL", "無訊號"),
 ]
 
+TRADE_BASE_PCTS = {
+    "STRONG": 50,
+    "MID": 40,
+    "WEAK": 10,
+    "NOTICE": 0,
+    "NEUTRAL": 0,
+}
+
 
 # ── 讀取設定 ────────────────────────────────────────────────
 def load_config() -> dict:
@@ -397,6 +405,186 @@ def score_to_signal(score: float) -> tuple:
     return "NEUTRAL", "無訊號"
 
 
+def classify_market_regime(close: float, ma_s: float, ma_m: float, ma_l: float,
+                           ma_s_prev: float, ma_m_prev: float, ma_l_prev: float) -> dict:
+    ma_s_up = ma_s > ma_s_prev
+    ma_m_up = ma_m > ma_m_prev
+    ma_l_up = ma_l > ma_l_prev
+
+    if ma_m > ma_l and close > ma_m and ma_s_up and ma_m_up and ma_l_up:
+        return {
+            "key": "STRONG_BULL",
+            "label": "大多頭",
+            "color": UP_COLOR,
+            "note": "中期均線維持多頭排列，價格也站在主要均線上方；此時重點是抱住核心部位，不因短線弱賣出訊號頻繁下車。",
+        }
+    if ma_m > ma_l:
+        return {
+            "key": "BULL_PULLBACK",
+            "label": "多頭修正",
+            "color": WARN_COLOR,
+            "note": "中期仍是多頭，但短線轉弱或跌回均線附近；此時適合觀察是否回到支撐，而不是把它直接當成空頭。",
+        }
+    if ma_m < ma_l and close < ma_m:
+        return {
+            "key": "BEAR",
+            "label": "空頭",
+            "color": DOWN_COLOR,
+            "note": "中期均線偏空且價格落在主要均線下方；此時賣出訊號權重提高，買進訊號需更保守。",
+        }
+    return {
+        "key": "RANGE",
+        "label": "盤整",
+        "color": NEUTRAL_COLOR,
+        "note": "趨勢方向尚未明確；此時可依分數分批，但不宜把單一弱訊號視為重倉依據。",
+    }
+
+
+def _parse_signal_level(level: str) -> tuple:
+    if level.startswith("BUY_"):
+        return "BUY", level.replace("BUY_", "")
+    if level.startswith("SELL_"):
+        return "SELL", level.replace("SELL_", "")
+    if level.startswith("OVERHEATED_"):
+        return "OVERHEATED", level.replace("OVERHEATED_", "")
+    return "HOLD", "NEUTRAL"
+
+
+def build_trade_plan(level: str, regime: dict, b60: dict, lev_warn: bool = False) -> dict:
+    direction, level_key = _parse_signal_level(level)
+    base_pct = TRADE_BASE_PCTS.get(level_key, 0)
+    regime_key = regime["key"]
+    action = "觀察"
+    trade_pct = 0
+    color = NEUTRAL_COLOR
+    headline = "不建議交易"
+    reason = "目前訊號不足，保留觀察即可。"
+
+    if direction == "BUY":
+        action = "買進或加碼"
+        color = UP_COLOR
+        if regime_key == "BEAR":
+            trade_pct = {"STRONG": 20, "MID": 10, "WEAK": 0, "NOTICE": 0, "NEUTRAL": 0}.get(level_key, 0)
+            reason = "空頭環境下即使出現買訊，也先視為反彈或試單，不建議直接重倉。"
+        elif regime_key == "STRONG_BULL" and b60["zone"] == "overheated":
+            trade_pct = 0
+            action = "暫停追買"
+            color = WARN_COLOR
+            reason = "大多頭仍可續抱，但季線乖離已高，不建議用新資金追價。"
+        elif regime_key == "STRONG_BULL":
+            trade_pct = base_pct
+            reason = "大多頭環境下，買訊可順勢執行，但仍只在訊號首次出現或升級時加碼。"
+        elif regime_key == "BULL_PULLBACK":
+            trade_pct = base_pct
+            reason = "多頭修正中的買訊較有分批布局意義，但仍需保留後續加碼空間。"
+        else:
+            trade_pct = base_pct
+            reason = "盤整環境下依訊號分批，不一次打滿部位。"
+
+    elif direction == "SELL":
+        action = "賣出或減碼"
+        color = DOWN_COLOR
+        if regime_key == "STRONG_BULL":
+            trade_pct = {"STRONG": 30, "MID": 10, "WEAK": 0, "NOTICE": 0, "NEUTRAL": 0}.get(level_key, 0)
+            reason = "大多頭下弱賣出通常只是震盪提醒；中訊號才小幅降風險，強訊號再明顯減碼。"
+        elif regime_key == "BULL_PULLBACK":
+            trade_pct = {"STRONG": 40, "MID": 20, "WEAK": 0, "NOTICE": 0, "NEUTRAL": 0}.get(level_key, 0)
+            reason = "多頭修正時先守核心持股，弱賣出不急著動作，中強訊號才分批降部位。"
+        elif regime_key == "BEAR":
+            trade_pct = base_pct
+            reason = "空頭環境下賣出訊號可信度提高，可依原始比例控管風險。"
+        else:
+            trade_pct = base_pct
+            reason = "盤整環境下依原始比例分批，避免單日判斷過度影響部位。"
+
+    elif direction == "OVERHEATED":
+        action = "禁止追買"
+        color = WARN_COLOR
+        if level_key in ("MID", "STRONG"):
+            if regime_key == "STRONG_BULL":
+                trade_pct = 10 if level_key == "MID" else 30
+                reason = "行情仍屬大多頭，但已過熱且賣壓分數升高；以小幅停利或降低槓桿為主，不清空核心部位。"
+            elif regime_key == "BULL_PULLBACK":
+                trade_pct = 20 if level_key == "MID" else 40
+                reason = "過熱後進入修正，賣壓分數已不低，可分批降部位並等待下一次整理。"
+            else:
+                trade_pct = base_pct
+                reason = "過熱且賣壓明顯，先降低風險，不新增買進。"
+            action = "減碼"
+            color = DOWN_COLOR
+        else:
+            trade_pct = 0
+            reason = "過熱代表不追買；但賣出分數還不夠強，若處在多頭中不建議只因過熱就下車。"
+
+    if level_key == "NOTICE":
+        trade_pct = 0
+        reason = "提醒等級只代表市場溫度有變化，不作為實際交易依據。"
+
+    if lev_warn and trade_pct > 0:
+        trade_pct = min(trade_pct, 20)
+        reason += " 槓桿ETF波動與耗損較高，單次動作上限先壓低。"
+
+    if trade_pct > 0:
+        headline = f"{action} {trade_pct}%"
+    elif action == "暫停追買":
+        headline = "暫停追買"
+    elif action == "禁止追買":
+        headline = "禁止追買，核心部位續抱觀察"
+    else:
+        headline = "不交易，觀察"
+
+    return {
+        "headline": headline,
+        "action": action,
+        "trade_pct": trade_pct,
+        "base_pct": base_pct,
+        "color": color,
+        "reason": reason,
+        "regime": regime,
+        "repeat_rule": "同一等級訊號連續出現時，不建議每天重複交易；只有首次出現、訊號升級，或部位尚未達計畫比例時才執行。",
+    }
+
+
+def trade_plan_html(result: dict, compact: bool = False) -> str:
+    trade_plan = result.get("trade_plan", {})
+    if not trade_plan:
+        return ""
+
+    regime = trade_plan.get("regime", result.get("regime", {}))
+    status_tags = (
+        f'<span style="background:{regime.get("color", NEUTRAL_COLOR)};color:#fff;'
+        f'font-size:12px;font-weight:bold;padding:4px 8px;border-radius:5px;'
+        f'white-space:nowrap;display:inline-block;margin-right:6px;">'
+        f'{regime.get("label", "市場狀態不明")}</span>'
+    )
+    if result.get("b60", {}).get("zone") == "overheated":
+        status_tags += (
+            f'<span style="background:#c0392b;color:#fff;font-size:12px;'
+            f'font-weight:bold;padding:4px 8px;border-radius:5px;white-space:nowrap;'
+            f'display:inline-block;margin-right:6px;">過熱鎖定</span>'
+        )
+    elif result.get("b60", {}).get("zone") == "oversold":
+        status_tags += (
+            f'<span style="background:#2980b9;color:#fff;font-size:12px;'
+            f'font-weight:bold;padding:4px 8px;border-radius:5px;white-space:nowrap;'
+            f'display:inline-block;margin-right:6px;">超跌區</span>'
+        )
+
+    margin = "margin-top:8px;" if compact else ""
+    return (
+        f'<div style="{margin}background:#fff;border:1px solid #eee;border-left:5px solid '
+        f'{trade_plan.get("color", NEUTRAL_COLOR)};border-radius:8px;padding:10px 12px;">'
+        f'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:7px;">'
+        f'{status_tags}'
+        f'<span style="color:{trade_plan.get("color", NEUTRAL_COLOR)};'
+        f'font-size:15px;font-weight:bold;">{trade_plan.get("headline", "不交易，觀察")}</span>'
+        f'</div>'
+        f'<div style="font-size:12px;color:#555;line-height:1.7;">'
+        f'{trade_plan.get("reason", "")}</div>'
+        f'</div>'
+    )
+
+
 def _direction_style(direction: str, level_key: str, locked: bool = False) -> tuple:
     if locked:
         return "🔥", "#fdecea", UP_COLOR
@@ -736,7 +924,7 @@ def evaluate_weighted(df: pd.DataFrame, scfg: dict, inst: dict | None = None,
     above_ma_s = close > ma_s
     if ma_m > ma_l and above_ma_s and ma_s_dir:
         trend = "healthy_bull"
-        trend_label, trend_color = "多頭健康", UP_COLOR
+        trend_label, trend_color = "多頭健康", DOWN_COLOR
         trend_buy, trend_sell = WEIGHTS["trend"], 0
     elif ma_m > ma_l and (not above_ma_s or not ma_s_dir):
         trend = "weak_bull"
@@ -744,7 +932,7 @@ def evaluate_weighted(df: pd.DataFrame, scfg: dict, inst: dict | None = None,
         trend_buy, trend_sell = 0, WEIGHTS["trend"] * 0.4
     elif ma_m < ma_l:
         trend = "bear"
-        trend_label, trend_color = "空頭確認", DOWN_COLOR
+        trend_label, trend_color = "空頭確認", UP_COLOR
         trend_buy, trend_sell = 0, WEIGHTS["trend"]
     else:
         trend = "neutral"
@@ -757,6 +945,7 @@ def evaluate_weighted(df: pd.DataFrame, scfg: dict, inst: dict | None = None,
         f"趨勢代表目前市場主方向，是本模型最重要的判斷項目｜均線交叉已包含在趨勢判斷中，不重複加分",
         trend_buy, trend_sell,
     )
+    regime = classify_market_regime(close, ma_s, ma_m, ma_l, ma_s_prev, ma_m_prev, ma_l_prev)
 
     if use_fx:
         fx = macro.get("fx") if macro else None
@@ -990,6 +1179,7 @@ def evaluate_weighted(df: pd.DataFrame, scfg: dict, inst: dict | None = None,
             "NEUTRAL": "賣出依據不足，繼續觀察",
         }[level_key]
 
+    trade_plan = build_trade_plan(level, regime, b60, lev_warn)
     pyramid = calc_pyramid(df, scfg, level)
 
     return dict(
@@ -999,7 +1189,8 @@ def evaluate_weighted(df: pd.DataFrame, scfg: dict, inst: dict | None = None,
         buy_score=buy_score, sell_score=sell_score,
         effective_buy=effective_buy, effective_sell=effective_sell,
         score_note="季線乖離過熱，買進分數已鎖定" if b60["locked"] else "",
-        max_possible=max_possible, b60=b60, pyramid=pyramid,
+        max_possible=max_possible, b60=b60, regime=regime,
+        trade_plan=trade_plan, pyramid=pyramid,
     )
 
 
@@ -1032,6 +1223,11 @@ def stock_html_block(name: str, ticker: str, result: dict, note: str = "") -> st
                      f'font-size:12px;color:#7d6608;border-bottom:1px solid #eee;">'
                      f'💡 {note}</div>')
 
+    trade_html = (
+        f'<div style="background:#fff;padding:12px 16px;border-bottom:1px solid #eee;">'
+        f'{trade_plan_html(result)}</div>'
+    )
+
     pyramid_html = ""
     if result["pyramid"]["suggestions"]:
         sugg = "".join(f'<li style="margin:4px 0;font-size:13px;">{s}</li>'
@@ -1052,10 +1248,8 @@ def stock_html_block(name: str, ticker: str, result: dict, note: str = "") -> st
         f'</div>'
         # 個股備註
         f'{note_html}'
-        # 訊號摘要
-        f'<div style="background:{result["bg"]};padding:10px 16px;border-bottom:2px solid {result["border"]}33;">'
-        f'<strong style="font-size:14px;">{result["summary"]}</strong>'
-        f'<span style="color:#555;margin-left:8px;font-size:13px;">— {result["advice"]}</span></div>'
+        # 實際交易建議
+        f'{trade_html}'
         # 指標明細表格
         f'<table style="width:100%;border-collapse:collapse;">{rows}</table>'
         # 金字塔建議
@@ -1067,38 +1261,20 @@ def stock_html_block(name: str, ticker: str, result: dict, note: str = "") -> st
 def summary_table(results: list) -> str:
     cards = ""
     for name, ticker, r in results:
-        badge = ""
-        if r["b60"]["zone"] == "overheated":
-            badge = (' <span style="background:#c0392b;color:#fff;'
-                     'font-size:11px;padding:3px 7px;border-radius:4px;display:inline-block;margin-left:6px;white-space:nowrap;">過熱</span>')
-        elif r["b60"]["zone"] == "oversold":
-            badge = (' <span style="background:#2980b9;color:#fff;'
-                     'font-size:11px;padding:3px 7px;border-radius:4px;display:inline-block;margin-left:6px;white-space:nowrap;">超跌</span>')
-        score_text = (
-            f'實際參考：買進 {r.get("effective_buy", 0):.0f} / 賣出 {r.get("effective_sell", 0):.0f}'
-            f'<br><span style="color:#999;">背景分數：買進 {r.get("buy_score", 0):.0f} / 賣出 {r.get("sell_score", 0):.0f}'
-            f'｜季線乖離 {r["b60"]["bias60"]:.1f}%</span>'
-        )
-        if r.get("score_note"):
-            score_text += f'<br><span style="color:#c0392b;">{r["score_note"]}</span>'
         code = ticker.replace(".TW", "").replace(".tw", "")
         cards += (
             f'<div style="border:1px solid #ddd;border-left:5px solid {r["border"]};'
             f'border-radius:8px;padding:12px 14px;margin-bottom:12px;background:#fff;">'
             f'<div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">'
             f'<div style="min-width:0;">'
-            f'<div style="font-size:16px;font-weight:bold;color:#2c3e50;line-height:1.4;">{name}{badge}</div>'
+            f'<div style="font-size:16px;font-weight:bold;color:#2c3e50;line-height:1.4;">{name}</div>'
             f'<div style="font-size:12px;color:#888;margin-top:2px;">代號 {code}</div>'
             f'</div>'
             f'<div style="text-align:right;white-space:nowrap;">'
             f'<div style="font-size:11px;color:#888;">收盤價</div>'
             f'<div style="font-size:18px;font-weight:bold;color:#2c3e50;">{r["close"]:.2f}</div>'
             f'</div></div>'
-            f'<div style="margin-top:10px;font-weight:bold;color:{r["border"]};font-size:15px;line-height:1.5;">'
-            f'{r["summary"]}</div>'
-            f'<div style="margin-top:6px;color:#555;font-size:13px;line-height:1.6;">{r["advice"]}</div>'
-            f'<div style="margin-top:8px;color:#666;font-size:12px;line-height:1.7;background:#fafafa;'
-            f'border-radius:6px;padding:8px 10px;">{score_text}</div>'
+            f'{trade_plan_html(r, compact=True)}'
             f'</div>'
         )
     return f'<div style="margin-bottom:28px;">{cards}</div>'
@@ -1335,10 +1511,24 @@ def scoring_rules_html() -> str:
         f'</tr>'
         for name, score, meaning in weights
     )
+    trade_rows = "".join(
+        f'<tr style="border-bottom:1px solid #eee;">'
+        f'<td style="padding:7px 9px;font-weight:bold;color:#2c3e50;">{level}</td>'
+        f'<td style="padding:7px 9px;color:#777;font-size:12px;">{note}</td>'
+        f'</tr>'
+        for level, note in [
+            ("提醒", "只提醒市場溫度變化，不作為實際交易依據"),
+            ("弱訊號", "只做觀察或小幅試單，不能單獨當成重倉理由"),
+            ("中訊號", "代表多項條件開始一致，可考慮分批建立或降低部位"),
+            ("強訊號", "代表高權重條件共振，但仍需保留後續調整空間"),
+        ]
+    )
     return (
-        f'<div style="background:#f7fbff;border:1px solid #cfe2f3;border-radius:8px;'
-        f'padding:14px 16px;margin-bottom:22px;">'
-        f'<div style="font-weight:bold;color:#1f4e79;font-size:15px;margin-bottom:8px;">評分怎麼看</div>'
+        f'<details style="background:#f7fbff;border:1px solid #cfe2f3;border-radius:8px;'
+        f'padding:12px 14px;margin-bottom:22px;">'
+        f'<summary style="cursor:pointer;font-weight:bold;color:#1f4e79;font-size:15px;">'
+        f'評分標準</summary>'
+        f'<div style="margin-top:12px;">'
         f'<div style="font-size:13px;color:#555;line-height:1.7;margin-bottom:12px;">'
         f'系統會分別計算買進與賣出分數，最後以「實際參考分」作為主要判斷。'
         f'若季線乖離過熱，買進分數會被歸零，只保留背景分數讓你知道原本有哪些條件偏多。</div>'
@@ -1357,7 +1547,18 @@ def scoring_rules_html() -> str:
         f'</tr></thead><tbody>{weight_rows}</tbody></table>'
         f'<div style="font-size:12px;color:#777;line-height:1.6;margin-top:10px;">'
         f'BIAS60 用來判斷中期過熱或超跌，不直接加分；過熱時會鎖住買進，避免追高。</div>'
-        f'</div>'
+        f'<div style="font-weight:bold;color:#1f4e79;font-size:14px;margin:14px 0 8px;">交易訊號怎麼用</div>'
+        f'<div style="font-size:13px;color:#555;line-height:1.7;margin-bottom:10px;">'
+        f'這裡說明訊號等級的用途，不代表一定要完整照比例下單。'
+        f'系統會再依市場狀態調整：大多頭少賣、空頭少買、盤整時才較適合分批操作。'
+        f'同一等級訊號連續出現時，不建議每天重複交易。</div>'
+        f'<table style="width:100%;border-collapse:collapse;background:#fff;border:1px solid #e5eef7;'
+        f'border-radius:6px;overflow:hidden;">'
+        f'<thead><tr style="background:#eaf4fb;color:#1f4e79;">'
+        f'<th style="padding:8px 9px;text-align:left;">等級</th>'
+        f'<th style="padding:8px 9px;text-align:left;">實際用途</th>'
+        f'</tr></thead><tbody>{trade_rows}</tbody></table>'
+        f'</div></details>'
     )
 
 
