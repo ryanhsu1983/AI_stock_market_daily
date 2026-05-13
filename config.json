@@ -192,5 +192,11 @@
     "to": "zergva@gmail.com",
     "from": "zergva@gmail.com",
     "subject": "【每日股市訊號報告】{date}"
+  },
+
+  "drive_report": {
+    "enabled": true,
+    "folder_id": "1RV8zv7ir40zloTylu5kOD8z-wyft6xjQ",
+    "image_width": 900
   }
 }
