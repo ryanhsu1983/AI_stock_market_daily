@@ -44,6 +44,81 @@
         "leverage_warning": false,
         "ma_periods": {"short": 10, "mid": 20, "long": 60}
       }
+    },
+    {
+      "ticker": "2308.TW",
+      "name": "台達電",
+      "note": "電源管理、AI伺服器電源與散熱相關權值股，受AI基礎建設、匯率與外資籌碼影響",
+      "overrides": {
+        "kd_buy": 35, "kd_sell": 75,
+        "bias60_p_low": 5, "bias60_p_high": 95,
+        "use_obv": true, "use_vol_trend": true,
+        "use_institutional": true,
+        "use_fx": true, "use_rates": true,
+        "macro_sensitivity": "exporter",
+        "leverage_warning": false,
+        "ma_periods": {"short": 10, "mid": 20, "long": 60}
+      }
+    },
+    {
+      "ticker": "2317.TW",
+      "name": "鴻海",
+      "note": "電子代工與AI伺服器供應鏈核心股，受外資、美元匯率、AI伺服器需求與消費電子循環影響",
+      "overrides": {
+        "kd_buy": 35, "kd_sell": 75,
+        "bias60_p_low": 5, "bias60_p_high": 95,
+        "use_obv": true, "use_vol_trend": true,
+        "use_institutional": true,
+        "use_fx": true, "use_rates": true,
+        "macro_sensitivity": "exporter",
+        "leverage_warning": false,
+        "ma_periods": {"short": 10, "mid": 20, "long": 60}
+      }
+    },
+    {
+      "ticker": "2382.TW",
+      "name": "廣達",
+      "note": "筆電與AI伺服器代工指標股，受AI伺服器出貨、雲端客戶資本支出與匯率影響",
+      "overrides": {
+        "kd_buy": 35, "kd_sell": 75,
+        "bias60_p_low": 5, "bias60_p_high": 95,
+        "use_obv": true, "use_vol_trend": true,
+        "use_institutional": true,
+        "use_fx": true, "use_rates": true,
+        "macro_sensitivity": "exporter",
+        "leverage_warning": false,
+        "ma_periods": {"short": 10, "mid": 20, "long": 60}
+      }
+    },
+    {
+      "ticker": "3231.TW",
+      "name": "緯創",
+      "note": "AI伺服器與資通訊代工股，波動較大，受AI訂單、外資籌碼與美元匯率影響",
+      "overrides": {
+        "kd_buy": 30, "kd_sell": 70,
+        "bias60_p_low": 5, "bias60_p_high": 95,
+        "use_obv": true, "use_vol_trend": true,
+        "use_institutional": true,
+        "use_fx": true, "use_rates": true,
+        "macro_sensitivity": "exporter",
+        "leverage_warning": false,
+        "ma_periods": {"short": 10, "mid": 20, "long": 60}
+      }
+    },
+    {
+      "ticker": "6669.TW",
+      "name": "緯穎",
+      "note": "AI伺服器與雲端資料中心供應鏈高價股，受雲端客戶資本支出、AI需求與籌碼波動影響",
+      "overrides": {
+        "kd_buy": 30, "kd_sell": 70,
+        "bias60_p_low": 5, "bias60_p_high": 95,
+        "use_obv": true, "use_vol_trend": true,
+        "use_institutional": true,
+        "use_fx": true, "use_rates": true,
+        "macro_sensitivity": "exporter",
+        "leverage_warning": false,
+        "ma_periods": {"short": 10, "mid": 20, "long": 60}
+      }
     }
   ],
 
