@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 email_preview.html
 .yfinance_cache/
+social_report_*.html
+*.png

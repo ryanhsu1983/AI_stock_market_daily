@@ -552,6 +552,12 @@ def trade_plan_html(result: dict, compact: bool = False) -> str:
         return ""
 
     regime = trade_plan.get("regime", result.get("regime", {}))
+    signal_badge = (
+        f'<span style="background:{result.get("border", NEUTRAL_COLOR)};color:#fff;'
+        f'font-size:12px;font-weight:bold;padding:4px 8px;border-radius:5px;'
+        f'white-space:nowrap;display:inline-block;margin-right:6px;">'
+        f'💡 {result.get("summary", "無訊號")}</span>'
+    )
     status_tags = (
         f'<span style="background:{regime.get("color", NEUTRAL_COLOR)};color:#fff;'
         f'font-size:12px;font-weight:bold;padding:4px 8px;border-radius:5px;'
@@ -576,6 +582,7 @@ def trade_plan_html(result: dict, compact: bool = False) -> str:
         f'<div style="{margin}background:#fff;border:1px solid #eee;border-left:5px solid '
         f'{trade_plan.get("color", NEUTRAL_COLOR)};border-radius:8px;padding:10px 12px;">'
         f'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:7px;">'
+        f'{signal_badge}'
         f'{status_tags}'
         f'<span style="color:{trade_plan.get("color", NEUTRAL_COLOR)};'
         f'font-size:15px;font-weight:bold;">{trade_plan.get("headline", "不交易，觀察")}</span>'
@@ -1617,6 +1624,111 @@ def build_email_html(results: list, today: str, cfg: dict | None = None,
             f'</div></body></html>')
 
 
+def _social_item(result: dict, label: str, default: str = "-") -> str:
+    for item_label, value, _color, _note in result.get("items", []):
+        if item_label == label or item_label.startswith(label):
+            return str(value)
+    return default
+
+
+def _social_reason(result: dict) -> str:
+    trade_plan = result.get("trade_plan", {})
+    reason = trade_plan.get("reason") or result.get("advice", "")
+    return html_lib.escape(reason[:90] + ("..." if len(reason) > 90 else ""))
+
+
+def build_social_report_pages(results: list, today: str, cfg: dict | None = None,
+                              macro: dict | None = None, news_items: list | None = None) -> list[str]:
+    news_items = news_items or []
+    date_text = today.replace("-", "/")
+    css = """
+    <style>
+      *{box-sizing:border-box} body{margin:0;background:#eef2f5;font-family:Arial,'Noto Sans TC',sans-serif;color:#1f2d3d}
+      .page{width:1080px;height:1920px;background:#f7f9fb;padding:54px 60px;overflow:hidden}
+      .header{background:#243447;color:#fff;border-radius:24px;padding:30px 34px;margin-bottom:28px}
+      .title{font-size:42px;font-weight:800;line-height:1.2}.date{font-size:24px;opacity:.82;margin-top:8px}
+      .section{background:#fff;border:1px solid #dfe6ee;border-radius:22px;padding:24px 28px;margin-bottom:22px;box-shadow:0 8px 20px rgba(31,45,61,.06)}
+      .section-title{font-size:28px;font-weight:800;margin-bottom:18px;color:#243447;display:flex;align-items:center;gap:10px}
+      .market-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}.metric{background:#f3f6f9;border-radius:16px;padding:16px}.metric-label{font-size:18px;color:#6b7785}.metric-value{font-size:28px;font-weight:800;margin-top:6px}
+      .news{font-size:22px;line-height:1.45;margin:10px 0;padding-left:8px;border-left:8px solid #e67e22}.news small{display:block;color:#7b8794;font-size:17px;margin-top:4px}
+      table{width:100%;border-collapse:separate;border-spacing:0 10px}.stock-row{background:#fff}.stock-row td{padding:16px 12px;border-top:1px solid #e6ebf0;border-bottom:1px solid #e6ebf0;font-size:20px;vertical-align:middle}.stock-row td:first-child{border-left:8px solid var(--c);border-radius:14px 0 0 14px}.stock-row td:last-child{border-radius:0 14px 14px 0;border-right:1px solid #e6ebf0}.name{font-size:23px;font-weight:800}.code{font-size:16px;color:#7b8794;margin-top:2px}.signal{font-size:19px;font-weight:800;color:var(--c)}.op{font-size:19px;font-weight:800}.small{font-size:17px;color:#6b7785;line-height:1.35}
+      .cards{display:grid;grid-template-columns:1fr 1fr;gap:18px}.card{background:#fff;border:1px solid #dfe6ee;border-left:10px solid var(--c);border-radius:20px;padding:20px;min-height:190px}.card-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.card-name{font-size:25px;font-weight:800}.price{font-size:24px;font-weight:800}.badge{display:inline-block;background:var(--c);color:#fff;border-radius:999px;padding:7px 12px;font-size:17px;font-weight:800;margin:12px 0 8px}.reason{font-size:19px;line-height:1.45;color:#4a5562}.footer{font-size:16px;color:#7b8794;text-align:center;margin-top:12px}
+    </style>
+    """
+    market = results[0][2] if results else {}
+    fx = macro.get("fx") if macro else None
+    rates = macro.get("rates") if macro else None
+    market_html = f"""
+      <div class='section'><div class='section-title'>📌 市場快速總覽</div>
+        <div class='market-grid'>
+          <div class='metric'><div class='metric-label'>台股加權</div><div class='metric-value'>{market.get('close', 0):.2f}</div></div>
+          <div class='metric'><div class='metric-label'>美元/台幣</div><div class='metric-value'>{fx['value']:.3f}</div></div>""" if fx else f"""
+      <div class='section'><div class='section-title'>📌 市場快速總覽</div>
+        <div class='market-grid'>
+          <div class='metric'><div class='metric-label'>台股加權</div><div class='metric-value'>{market.get('close', 0):.2f}</div></div>
+          <div class='metric'><div class='metric-label'>美元/台幣</div><div class='metric-value'>-</div></div>"""
+    market_html += f"""
+          <div class='metric'><div class='metric-label'>美10年債</div><div class='metric-value'>{rates['value']:.2f}%</div></div>""" if rates else """
+          <div class='metric'><div class='metric-label'>美10年債</div><div class='metric-value'>-</div></div>"""
+    market_html += "</div></div>"
+
+    news_rows = "".join(
+        f"<div class='news'>{html_lib.escape(n.get('title',''))}<small>{html_lib.escape(n.get('date',''))}｜{html_lib.escape(n.get('source','Google News'))}</small></div>"
+        for n in news_items[:3]
+    ) or "<div class='small'>近 3 天尚未抓到高關聯新聞。</div>"
+
+    table_rows = ""
+    for name, ticker, r in results:
+        code = ticker.replace(".TW", "").replace(".tw", "")
+        b60 = r.get("b60", {})
+        regime = r.get("regime", {})
+        trade_plan = r.get("trade_plan", {})
+        table_rows += (
+            f"<tr class='stock-row' style='--c:{r.get('border', NEUTRAL_COLOR)}'>"
+            f"<td><div class='name'>{html_lib.escape(name)}</div><div class='code'>{code}</div></td>"
+            f"<td class='signal'>💡 {html_lib.escape(r.get('summary','無訊號'))}</td>"
+            f"<td class='op'>{html_lib.escape(trade_plan.get('headline','觀察'))}</td>"
+            f"<td class='small'>買 {r.get('effective_buy',0):.0f} / 賣 {r.get('effective_sell',0):.0f}<br>BIAS60 {b60.get('bias60',0):.1f}%<br>{html_lib.escape(regime.get('label',''))}</td>"
+            f"</tr>"
+        )
+
+    page1 = f"""<!DOCTYPE html><html><head><meta charset='utf-8'>{css}</head><body><div class='page'>
+      <div class='header'><div class='title'>每日股市訊號報告</div><div class='date'>{date_text} 收盤後分析｜社群摘要</div></div>
+      {market_html}
+      <div class='section'><div class='section-title'>🗞️ 近 3 天市場消息</div>{news_rows}</div>
+      <div class='section'><div class='section-title'>💡 追蹤標的訊號總覽</div><table>{table_rows}</table></div>
+      <div class='footer'>本圖由自動化模型產生，僅供參考，不構成投資建議。</div>
+    </div></body></html>"""
+
+    cards = ""
+    for name, ticker, r in results:
+        code = ticker.replace(".TW", "").replace(".tw", "")
+        trade_plan = r.get("trade_plan", {})
+        cards += (
+            f"<div class='card' style='--c:{r.get('border', NEUTRAL_COLOR)}'>"
+            f"<div class='card-head'><div><div class='card-name'>{html_lib.escape(name)}</div><div class='code'>{code}</div></div><div class='price'>{r.get('close',0):.2f}</div></div>"
+            f"<div class='badge'>💡 {html_lib.escape(r.get('summary','無訊號'))}</div>"
+            f"<div class='op'>{html_lib.escape(trade_plan.get('headline','觀察'))}</div>"
+            f"<div class='reason'>{_social_reason(r)}</div>"
+            f"</div>"
+        )
+    page2 = f"""<!DOCTYPE html><html><head><meta charset='utf-8'>{css}</head><body><div class='page'>
+      <div class='header'><div class='title'>個股操作訊號</div><div class='date'>{date_text}｜大型與中大型權值股</div></div>
+      <div class='cards'>{cards}</div>
+      <div class='footer'>完整指標與評分細節請以 Email 報告為準。</div>
+    </div></body></html>"""
+    return [page1, page2]
+
+
+def save_social_report_pages(pages: list[str], today: str) -> list[Path]:
+    paths = []
+    date_key = today.replace("-", "")
+    for idx, html in enumerate(pages, start=1):
+        path = Path(__file__).parent / f"social_report_{idx:02d}.html"
+        path.write_text(html, encoding="utf-8")
+        paths.append(path)
+    return paths
+
 # ── 本機 HTML 預覽 ───────────────────────────────────────────
 def save_email_preview(html: str) -> Path:
     preview_path = Path(__file__).parent / "email_preview.html"
@@ -1625,12 +1737,12 @@ def save_email_preview(html: str) -> Path:
 
 
 # ── 產生分享圖片與上傳雲端硬碟 ───────────────────────────────
-def render_report_image(html_path: Path, today: str, cfg: dict) -> Path | None:
+def render_report_image(html_path: Path, today: str, cfg: dict, output_name: str | None = None, full_page: bool = True, height: int = 1200) -> Path | None:
     drive_cfg = cfg.get("drive_report", {})
     if not drive_cfg.get("enabled", False):
         return None
 
-    image_path = Path(__file__).parent / f"{today.replace('-', '')}.png"
+    image_path = Path(__file__).parent / (output_name or f"{today.replace('-', '')}.png")
     width = int(drive_cfg.get("image_width", 900))
 
     try:
@@ -1643,11 +1755,11 @@ def render_report_image(html_path: Path, today: str, cfg: dict) -> Path | None:
         with sync_playwright() as p:
             browser = p.chromium.launch(args=["--no-sandbox"])
             page = browser.new_page(
-                viewport={"width": width, "height": 1200},
+                viewport={"width": width, "height": height},
                 device_scale_factor=2,
             )
             page.goto(html_path.resolve().as_uri(), wait_until="networkidle")
-            page.screenshot(path=str(image_path), full_page=True)
+            page.screenshot(path=str(image_path), full_page=full_page)
             browser.close()
         return image_path
     except Exception as exc:
@@ -1730,7 +1842,7 @@ def upload_report_image_to_drive(image_path: Path, today: str, cfg: dict) -> str
     try:
         service = build("drive", "v3", credentials=credentials, cache_discovery=False)
         print(f"使用 Google Drive {auth_mode} 憑證上傳圖片")
-        file_name = f"{today.replace('-', '')}.png"
+        file_name = image_path.name
         media = MediaFileUpload(str(image_path), mimetype="image/png", resumable=False)
         query = (
             f"'{folder_id}' in parents and "
@@ -1838,12 +1950,20 @@ def main():
     preview_path = save_email_preview(html)
     print(f"\n已產生 Email 預覽：{preview_path}")
 
-    image_path = render_report_image(preview_path, today, cfg)
-    if image_path:
-        print(f"已產生分享圖片：{image_path}")
-        drive_link = upload_report_image_to_drive(image_path, today, cfg)
-        if drive_link:
-            print(f"已上傳分享圖片至 Google Drive：{drive_link}")
+    social_pages = save_social_report_pages(
+        build_social_report_pages(results, today, cfg, macro, news_items), today
+    )
+    date_key = today.replace("-", "")
+    for idx, social_page in enumerate(social_pages, start=1):
+        image_name = f"{date_key}_{idx:02d}.png"
+        image_path = render_report_image(
+            social_page, today, cfg, output_name=image_name, full_page=False, height=1920
+        )
+        if image_path:
+            print(f"已產生社群分享圖片：{image_path}")
+            drive_link = upload_report_image_to_drive(image_path, today, cfg)
+            if drive_link:
+                print(f"已上傳社群分享圖片至 Google Drive：{drive_link}")
 
     print(f"\n發送 Email 至 {cfg['email']['to']} ...")
     try:
