@@ -12,6 +12,7 @@ env:
 jobs:
   run-signal:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
 
     steps:
       - name: 取得程式碼
@@ -23,9 +24,13 @@ jobs:
           python-version: '3.11'
 
       - name: 安裝套件
-        run: pip install yfinance pandas requests
+        run: |
+          pip install yfinance pandas requests playwright google-api-python-client google-auth
+          playwright install --with-deps chromium
 
       - name: 執行訊號分析
         env:
           GMAIL_PASSWORD: ${{ secrets.GMAIL_PASSWORD }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_DRIVE_FOLDER_ID: ${{ vars.GOOGLE_DRIVE_FOLDER_ID }}
         run: python 0050_signal_system.py

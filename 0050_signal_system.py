@@ -6,7 +6,7 @@ v4 新增：每檔股票獨立 overrides 設定，支援個別化指標門檻與
 """
 
 import html as html_lib
-import json, os, re, smtplib, sys, requests
+import base64, json, os, re, smtplib, sys, requests
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 from urllib.parse import quote_plus
@@ -1624,6 +1624,114 @@ def save_email_preview(html: str) -> Path:
     return preview_path
 
 
+# ── 產生分享圖片與上傳雲端硬碟 ───────────────────────────────
+def render_report_image(html_path: Path, today: str, cfg: dict) -> Path | None:
+    drive_cfg = cfg.get("drive_report", {})
+    if not drive_cfg.get("enabled", False):
+        return None
+
+    image_path = Path(__file__).parent / f"{today.replace('-', '')}.png"
+    width = int(drive_cfg.get("image_width", 900))
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception as exc:
+        print(f"⚠️  未安裝 Playwright，跳過產生圖片：{exc}")
+        return None
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(args=["--no-sandbox"])
+            page = browser.new_page(
+                viewport={"width": width, "height": 1200},
+                device_scale_factor=2,
+            )
+            page.goto(html_path.resolve().as_uri(), wait_until="networkidle")
+            page.screenshot(path=str(image_path), full_page=True)
+            browser.close()
+        return image_path
+    except Exception as exc:
+        print(f"⚠️  產生報告圖片失敗：{exc}")
+        return None
+
+
+def _load_google_service_account_info() -> dict | None:
+    raw = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
+    if not raw:
+        return None
+    try:
+        if raw.startswith("{"):
+            return json.loads(raw)
+        return json.loads(base64.b64decode(raw).decode("utf-8"))
+    except Exception as exc:
+        print(f"⚠️  GOOGLE_SERVICE_ACCOUNT_JSON 格式錯誤：{exc}")
+        return None
+
+
+def upload_report_image_to_drive(image_path: Path, today: str, cfg: dict) -> str | None:
+    drive_cfg = cfg.get("drive_report", {})
+    if not drive_cfg.get("enabled", False):
+        return None
+
+    folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID") or drive_cfg.get("folder_id")
+    if not folder_id:
+        print("⚠️  未設定 Google Drive folder_id，跳過上傳圖片")
+        return None
+
+    sa_info = _load_google_service_account_info()
+    if not sa_info:
+        print("⚠️  未設定 GOOGLE_SERVICE_ACCOUNT_JSON，已保留本機圖片但跳過上傳")
+        return None
+
+    try:
+        from google.oauth2 import service_account
+        from googleapiclient.discovery import build
+        from googleapiclient.http import MediaFileUpload
+    except Exception as exc:
+        print(f"⚠️  未安裝 Google Drive API 套件，跳過上傳：{exc}")
+        return None
+
+    try:
+        credentials = service_account.Credentials.from_service_account_info(
+            sa_info,
+            scopes=["https://www.googleapis.com/auth/drive"],
+        )
+        service = build("drive", "v3", credentials=credentials, cache_discovery=False)
+        file_name = f"{today.replace('-', '')}.png"
+        media = MediaFileUpload(str(image_path), mimetype="image/png", resumable=False)
+        query = (
+            f"'{folder_id}' in parents and "
+            f"name = '{file_name}' and "
+            "trashed = false"
+        )
+        existing = service.files().list(
+            q=query,
+            fields="files(id,name,webViewLink)",
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True,
+        ).execute().get("files", [])
+
+        if existing:
+            uploaded = service.files().update(
+                fileId=existing[0]["id"],
+                media_body=media,
+                fields="id,name,webViewLink",
+                supportsAllDrives=True,
+            ).execute()
+        else:
+            uploaded = service.files().create(
+                body={"name": file_name, "parents": [folder_id]},
+                media_body=media,
+                fields="id,name,webViewLink",
+                supportsAllDrives=True,
+            ).execute()
+
+        return uploaded.get("webViewLink")
+    except Exception as exc:
+        print(f"⚠️  上傳 Google Drive 失敗：{exc}")
+        return None
+
+
 # ── 發送 Email ───────────────────────────────────────────────
 def send_email(cfg: dict, html: str, today: str) -> bool:
     gmail_pass = os.environ.get("GMAIL_PASSWORD", "")
@@ -1636,9 +1744,14 @@ def send_email(cfg: dict, html: str, today: str) -> bool:
     msg["From"]    = ec["from"]
     msg["To"]      = ec["to"]
     msg.attach(MIMEText(html, "html", "utf-8"))
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
+    s = smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30)
+    try:
         s.login(ec["from"], gmail_pass)
         s.sendmail(ec["from"], ec["to"], msg.as_string())
+        s.quit()
+    except Exception:
+        s.close()
+        raise
     return True
 
 
@@ -1691,6 +1804,13 @@ def main():
     html = build_email_html(results, today, cfg, macro, news_items)
     preview_path = save_email_preview(html)
     print(f"\n已產生 Email 預覽：{preview_path}")
+
+    image_path = render_report_image(preview_path, today, cfg)
+    if image_path:
+        print(f"已產生分享圖片：{image_path}")
+        drive_link = upload_report_image_to_drive(image_path, today, cfg)
+        if drive_link:
+            print(f"已上傳分享圖片至 Google Drive：{drive_link}")
 
     print(f"\n發送 Email 至 {cfg['email']['to']} ...")
     try:
