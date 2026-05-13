@@ -132,19 +132,25 @@
 
   "ma_periods": {"short": 10, "mid": 20, "long": 60},
 
-  "market_events_lookahead_days": 45,
+  "market_events_window_days": 14,
   "auto_news": {
     "enabled": true,
-    "lookback_days": 7,
-    "max_items": 8,
+    "lookback_days": 3,
+    "max_items": 10,
+    "max_items_per_query": 3,
     "queries": [
+      "台股 重大事件 外資 匯率",
+      "台灣股市 今日 重大新聞",
       "台股 半導體 外資 匯率",
+      "川習會 台股 市場波動",
+      "美中峰會 台股 cnyes",
       "美中 關稅 晶片管制 台股",
       "Fed 利率 科技股 台股",
       "原油 油價 中東 股市",
       "美伊 戰爭 台股 原油",
       "台積電 營收 法說 AI 半導體",
-      "NVIDIA AI 半導體 台股"
+      "NVIDIA AI 半導體 台股",
+      "AI伺服器 台股 廣達 緯創 緯穎"
     ]
   },
 

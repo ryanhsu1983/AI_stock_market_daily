@@ -12,7 +12,7 @@ from email.utils import parsedate_to_datetime
 from urllib.parse import quote_plus
 import yfinance as yf
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
@@ -31,6 +31,7 @@ DOWN_COLOR = "#168f4d"
 WARN_COLOR = "#e67e22"
 INFO_COLOR = "#3498db"
 NEUTRAL_COLOR = "#95a5a6"
+TAIPEI_TZ = timezone(timedelta(hours=8))
 
 WEIGHTS = {
     "trend": 25,
@@ -1350,15 +1351,29 @@ def _classify_news_item(title: str) -> tuple:
     return impact, scope, note
 
 
+def _is_market_relevant_news(title: str) -> bool:
+    text = title.lower()
+    keywords = [
+        "台股", "加權", "櫃買", "外資", "匯率", "台幣", "半導體", "晶片", "關稅",
+        "美中", "川習", "習近平", "trump", "xi", "fed", "fomc", "利率", "殖利率",
+        "原油", "油價", "中東", "伊朗", "美伊", "霍爾木茲", "台積電", "tsmc",
+        "聯發科", "台達電", "鴻海", "廣達", "緯創", "緯穎", "nvidia", "ai",
+        "ai伺服器", "cnyes", "鉅亨",
+    ]
+    return any(keyword in text for keyword in keywords)
+
+
 def fetch_auto_news(cfg: dict) -> list:
     news_cfg = cfg.get("auto_news", {})
     if not news_cfg.get("enabled", False):
         return []
 
     queries = news_cfg.get("queries", [])
-    lookback_days = int(news_cfg.get("lookback_days", 7))
+    lookback_days = int(news_cfg.get("lookback_days", 3))
     max_items = int(news_cfg.get("max_items", 8))
-    min_date = datetime.now().astimezone() - timedelta(days=lookback_days)
+    max_items_per_query = int(news_cfg.get("max_items_per_query", 3))
+    now = datetime.now(TAIPEI_TZ)
+    min_date = now - timedelta(days=lookback_days)
     headers = {"User-Agent": "Mozilla/5.0"}
     items = []
     seen = set()
@@ -1376,6 +1391,7 @@ def fetch_auto_news(cfg: dict) -> list:
         except Exception:
             continue
 
+        query_count = 0
         for item in root.findall(".//item"):
             title = item.findtext("title", "").strip()
             link = item.findtext("link", "").strip()
@@ -1383,19 +1399,22 @@ def fetch_auto_news(cfg: dict) -> list:
             source = item.findtext("source", "").strip() or "Google News"
             if not title:
                 continue
-            key = re.sub(r"\s+", "", title.lower())
-            if key in seen:
+            if not _is_market_relevant_news(title):
                 continue
             try:
-                pub_dt = parsedate_to_datetime(pub_text).astimezone()
+                pub_dt = parsedate_to_datetime(pub_text).astimezone(TAIPEI_TZ)
             except Exception:
-                pub_dt = datetime.now().astimezone()
+                pub_dt = now
             if pub_dt < min_date:
+                continue
+            key = re.sub(r"\s+", "", f"{title}{source}".lower())
+            if key in seen:
                 continue
             impact, scope, note = _classify_news_item(title)
             seen.add(key)
             items.append({
-                "date": pub_dt.strftime("%Y-%m-%d"),
+                "date": pub_dt.strftime("%Y-%m-%d %H:%M"),
+                "_published_at": pub_dt,
                 "title": title,
                 "impact": impact,
                 "scope": scope,
@@ -1403,18 +1422,23 @@ def fetch_auto_news(cfg: dict) -> list:
                 "source": source,
                 "link": link,
             })
-            break
+            query_count += 1
+            if query_count >= max_items_per_query:
+                break
 
-    impact_rank = {"高": 0, "中高": 1, "中": 2, "低": 3}
-    items.sort(key=lambda x: (impact_rank.get(x["impact"], 9), x["date"]), reverse=False)
+    impact_rank = {"高": 3, "中高": 2, "中": 1, "低": 0}
+    items.sort(key=lambda x: (x["_published_at"], impact_rank.get(x["impact"], 0)), reverse=True)
+    for item in items:
+        item.pop("_published_at", None)
     return items[:max_items]
 
 
 def market_events_html(cfg: dict, today: str, news_items: list | None = None) -> str:
     events = cfg.get("market_events", [])
-    lookahead = int(cfg.get("market_events_lookahead_days", 45))
-    start = datetime.strptime(today, "%Y-%m-%d").date()
-    end = start + timedelta(days=lookahead)
+    window_days = int(cfg.get("market_events_window_days", cfg.get("market_events_lookahead_days", 3)))
+    today_date = datetime.strptime(today, "%Y-%m-%d").date()
+    start = today_date - timedelta(days=window_days)
+    end = today_date + timedelta(days=window_days)
     scheduled_rows = ""
     news_rows = ""
     impact_colors = {"高": "#c0392b", "中高": "#e67e22", "中": "#f39c12", "低": "#7f8c8d"}
@@ -1442,7 +1466,7 @@ def market_events_html(cfg: dict, today: str, news_items: list | None = None) ->
 
     if not scheduled_rows:
         scheduled_rows = (f'<tr><td style="padding:10px 12px;color:#777;font-size:12px;" colspan="4">'
-                f'未來 {lookahead} 天內尚未設定重大事件。</td></tr>')
+                f'前後 {window_days} 天內尚未設定重大事件。</td></tr>')
 
     for item in news_items or []:
         color = impact_colors.get(item.get("impact", ""), "#7f8c8d")
@@ -1470,7 +1494,8 @@ def market_events_html(cfg: dict, today: str, news_items: list | None = None) ->
     return (
         f'<h3 style="color:#2c3e50;border-bottom:2px solid #2c3e50;padding-bottom:6px;">消息面與重大行事曆</h3>'
         f'<div style="font-size:12px;color:#777;margin:-12px 0 10px;">'
-        f'固定行事曆負責未來日期；自動新聞掃描負責近期突發事件，例如油價、戰爭、美中、Fed與半導體新聞。</div>'
+        f'固定行事曆顯示今天前後 {window_days} 天事件；自動新聞掃描只抓近 '
+        f'{cfg.get("auto_news", {}).get("lookback_days", 3)} 天高關聯消息，例如油價、戰爭、美中、Fed與半導體新聞。</div>'
         f'<div style="font-weight:bold;color:#2c3e50;margin:4px 0 6px;">固定重大行事曆</div>'
         f'<table style="width:100%;border-collapse:collapse;margin-bottom:28px;'
         f'border:1px solid #ddd;border-radius:8px;overflow:hidden;">'
