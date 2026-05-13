@@ -1668,6 +1668,43 @@ def _load_google_service_account_info() -> dict | None:
         return None
 
 
+def _build_google_drive_credentials():
+    scopes = ["https://www.googleapis.com/auth/drive"]
+    refresh_token = os.environ.get("GOOGLE_OAUTH_REFRESH_TOKEN", "").strip()
+    client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "").strip()
+    client_secret = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "").strip()
+    if refresh_token and client_id and client_secret:
+        try:
+            from google.oauth2.credentials import Credentials
+            from google.auth.transport.requests import Request
+            credentials = Credentials(
+                token=None,
+                refresh_token=refresh_token,
+                token_uri="https://oauth2.googleapis.com/token",
+                client_id=client_id,
+                client_secret=client_secret,
+                scopes=scopes,
+            )
+            credentials.refresh(Request())
+            return credentials, "OAuth"
+        except Exception as exc:
+            print(f"⚠️  Google OAuth 憑證失敗，改試 service account：{exc}")
+
+    sa_info = _load_google_service_account_info()
+    if sa_info:
+        try:
+            from google.oauth2 import service_account
+            credentials = service_account.Credentials.from_service_account_info(
+                sa_info,
+                scopes=scopes,
+            )
+            return credentials, "service account"
+        except Exception as exc:
+            print(f"⚠️  Google service account 憑證失敗：{exc}")
+
+    return None, ""
+
+
 def upload_report_image_to_drive(image_path: Path, today: str, cfg: dict) -> str | None:
     drive_cfg = cfg.get("drive_report", {})
     if not drive_cfg.get("enabled", False):
@@ -1678,25 +1715,21 @@ def upload_report_image_to_drive(image_path: Path, today: str, cfg: dict) -> str
         print("⚠️  未設定 Google Drive folder_id，跳過上傳圖片")
         return None
 
-    sa_info = _load_google_service_account_info()
-    if not sa_info:
-        print("⚠️  未設定 GOOGLE_SERVICE_ACCOUNT_JSON，已保留本機圖片但跳過上傳")
-        return None
-
     try:
-        from google.oauth2 import service_account
         from googleapiclient.discovery import build
         from googleapiclient.http import MediaFileUpload
     except Exception as exc:
         print(f"⚠️  未安裝 Google Drive API 套件，跳過上傳：{exc}")
         return None
 
+    credentials, auth_mode = _build_google_drive_credentials()
+    if not credentials:
+        print("⚠️  未設定 Google OAuth 或 service account 憑證，已保留本機圖片但跳過上傳")
+        return None
+
     try:
-        credentials = service_account.Credentials.from_service_account_info(
-            sa_info,
-            scopes=["https://www.googleapis.com/auth/drive"],
-        )
         service = build("drive", "v3", credentials=credentials, cache_discovery=False)
+        print(f"使用 Google Drive {auth_mode} 憑證上傳圖片")
         file_name = f"{today.replace('-', '')}.png"
         media = MediaFileUpload(str(image_path), mimetype="image/png", resumable=False)
         query = (
