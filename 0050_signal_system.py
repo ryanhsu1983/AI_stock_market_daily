@@ -139,7 +139,7 @@ def fetch_institutional(ticker: str, lookback_days: int = 7) -> dict:
 
     last_error = ""
     for offset in range(lookback_days):
-        date_str = (datetime.today() - timedelta(days=offset)).strftime("%Y%m%d")
+        date_str = (datetime.now(TAIPEI_TZ) - timedelta(days=offset)).strftime("%Y%m%d")
         url = (
             "https://www.twse.com.tw/rwd/zh/fund/T86"
             f"?response=json&date={date_str}&selectType=ALL"
@@ -201,7 +201,8 @@ def fetch_institutional(ticker: str, lookback_days: int = 7) -> dict:
 
 # ── 抓取資料 ────────────────────────────────────────────────
 def fetch_data(ticker: str, days: int) -> pd.DataFrame:
-    end   = datetime.today()
+    # yfinance 的 end 是「不含當日」的結束日期；收盤後要抓到今天資料，必須設成台灣明天。
+    end   = datetime.now(TAIPEI_TZ).date() + timedelta(days=1)
     start = end - timedelta(days=days)
     df = yf.download(ticker,
                      start=start.strftime("%Y-%m-%d"),
@@ -214,7 +215,7 @@ def fetch_data(ticker: str, days: int) -> pd.DataFrame:
 
 
 def _fetch_close_series(ticker: str, days: int = 180) -> pd.Series:
-    end   = datetime.today()
+    end   = datetime.now(TAIPEI_TZ).date() + timedelta(days=1)
     start = end - timedelta(days=days)
     df = yf.download(ticker,
                      start=start.strftime("%Y-%m-%d"),
@@ -1817,6 +1818,52 @@ def _build_google_drive_credentials():
     return None, ""
 
 
+def build_google_drive_service():
+    try:
+        from googleapiclient.discovery import build
+    except Exception as exc:
+        print(f"⚠️  未安裝 Google Drive API 套件：{exc}")
+        return None, ""
+
+    credentials, auth_mode = _build_google_drive_credentials()
+    if not credentials:
+        return None, ""
+    return build("drive", "v3", credentials=credentials, cache_discovery=False), auth_mode
+
+
+def drive_file_exists(file_name: str, cfg: dict) -> bool:
+    drive_cfg = cfg.get("drive_report", {})
+    if not drive_cfg.get("enabled", False):
+        return False
+
+    folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID") or drive_cfg.get("folder_id")
+    if not folder_id:
+        return False
+
+    service, _auth_mode = build_google_drive_service()
+    if not service:
+        print("⚠️  無法檢查 Google Drive 既有檔案，繼續執行避免漏寄")
+        return False
+
+    try:
+        query = (
+            f"'{folder_id}' in parents and "
+            f"name = '{file_name}' and "
+            "trashed = false"
+        )
+        existing = service.files().list(
+            q=query,
+            fields="files(id,name)",
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True,
+        ).execute().get("files", [])
+        if existing:
+            print(f"Google Drive 已有 {file_name}，視為今日已完成，跳過備援重複寄送")
+            return True
+    except Exception as exc:
+        print(f"⚠️  檢查 Google Drive 既有檔案失敗，繼續執行避免漏寄：{exc}")
+    return False
+
 def upload_report_image_to_drive(image_path: Path, today: str, cfg: dict) -> str | None:
     drive_cfg = cfg.get("drive_report", {})
     if not drive_cfg.get("enabled", False):
@@ -1828,19 +1875,17 @@ def upload_report_image_to_drive(image_path: Path, today: str, cfg: dict) -> str
         return None
 
     try:
-        from googleapiclient.discovery import build
         from googleapiclient.http import MediaFileUpload
     except Exception as exc:
         print(f"⚠️  未安裝 Google Drive API 套件，跳過上傳：{exc}")
         return None
 
-    credentials, auth_mode = _build_google_drive_credentials()
-    if not credentials:
+    service, auth_mode = build_google_drive_service()
+    if not service:
         print("⚠️  未設定 Google OAuth 或 service account 憑證，已保留本機圖片但跳過上傳")
         return None
 
     try:
-        service = build("drive", "v3", credentials=credentials, cache_discovery=False)
         print(f"使用 Google Drive {auth_mode} 憑證上傳圖片")
         file_name = image_path.name
         media = MediaFileUpload(str(image_path), mimetype="image/png", resumable=False)
@@ -1903,8 +1948,12 @@ def send_email(cfg: dict, html: str, today: str) -> bool:
 # ── 主流程 ───────────────────────────────────────────────────
 def main():
     cfg   = load_config()
-    today = datetime.today().strftime("%Y-%m-%d")
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] 開始分析，共 {len(cfg['watchlist'])} 檔")
+    now_tw = datetime.now(TAIPEI_TZ)
+    today = now_tw.strftime("%Y-%m-%d")
+    print(f"[{now_tw.strftime('%Y-%m-%d %H:%M')}] 開始分析，共 {len(cfg['watchlist'])} 檔")
+    date_key = today.replace("-", "")
+    if drive_file_exists(f"{date_key}_01.png", cfg):
+        return
 
     macro = fetch_market_context()
     if macro.get("fx"):
@@ -1928,13 +1977,16 @@ def main():
         try:
             scfg = get_stock_cfg(stock, cfg)
             df   = fetch_data(ticker, cfg["lookback_days"])
+            data_date = df.index[-1].strftime("%Y-%m-%d")
             df   = calc_indicators(df, scfg)
             inst = fetch_institutional(ticker) if scfg.get("use_institutional", True) else None
             r    = evaluate_weighted(df, scfg, inst, macro)
             r["stock_note"] = note
+            r["data_date"] = data_date
             results.append((name, ticker, r))
             print(
                 f"{r['emoji']} {r['summary']} | "
+                f"資料日={data_date} | "
                 f"有效買{r['effective_buy']:.0f}/賣{r['effective_sell']:.0f} "
                 f"(原始買{r['buy_score']:.0f}/賣{r['sell_score']:.0f}) | "
                 f"BIAS60={r['b60']['bias60']:.1f}%"
@@ -1949,6 +2001,13 @@ def main():
     html = build_email_html(results, today, cfg, macro, news_items)
     preview_path = save_email_preview(html)
     print(f"\n已產生 Email 預覽：{preview_path}")
+
+    print(f"\n發送 Email 至 {cfg['email']['to']} ...")
+    try:
+        if send_email(cfg, html, today):
+            print("✅ Email 發送成功")
+    except Exception as e:
+        print(f"❌ Email 失敗：{e}")
 
     social_pages = save_social_report_pages(
         build_social_report_pages(results, today, cfg, macro, news_items), today
@@ -1965,12 +2024,6 @@ def main():
             if drive_link:
                 print(f"已上傳社群分享圖片至 Google Drive：{drive_link}")
 
-    print(f"\n發送 Email 至 {cfg['email']['to']} ...")
-    try:
-        if send_email(cfg, html, today):
-            print("✅ Email 發送成功")
-    except Exception as e:
-        print(f"❌ Email 失敗：{e}")
 
 
 if __name__ == "__main__":
