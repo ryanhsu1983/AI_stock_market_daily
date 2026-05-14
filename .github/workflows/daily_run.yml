@@ -4,6 +4,8 @@ on:
   schedule:
     # 台灣時間 14:06 = UTC 06:06，避開 GitHub Actions 整點高負載
     - cron: '6 6 * * *'
+    # 台灣時間 14:21 = UTC 06:21，備援觸發；程式會檢查同日是否已產出，避免重複寄送
+    - cron: '21 6 * * *'
   workflow_dispatch:          # 允許手動在網頁上觸發
 
 env:
