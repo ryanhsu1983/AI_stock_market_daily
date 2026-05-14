@@ -1669,8 +1669,8 @@ def build_social_report_pages(results: list, today: str, cfg: dict | None = None
           <div class='metric'><div class='metric-label'>台股加權</div><div class='metric-value'>{market.get('close', 0):.2f}</div></div>
           <div class='metric'><div class='metric-label'>美元/台幣</div><div class='metric-value'>-</div></div>"""
     market_html += f"""
-          <div class='metric'><div class='metric-label'>美10年債</div><div class='metric-value'>{rates['value']:.2f}%</div></div>""" if rates else """
-          <div class='metric'><div class='metric-label'>美10年債</div><div class='metric-value'>-</div></div>"""
+          <div class='metric'><div class='metric-label'>美10年債殖利率</div><div class='metric-value'>{rates['value']:.2f}%</div></div>""" if rates else """
+          <div class='metric'><div class='metric-label'>美10年債殖利率</div><div class='metric-value'>-</div></div>"""
     market_html += "</div></div>"
 
     news_rows = "".join(
@@ -2028,3 +2028,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
