@@ -14,7 +14,7 @@ if not exist "%PYTHON%" set "PYTHON=python"
 if exist "%~dp0email_preview.html" del "%~dp0email_preview.html"
 
 echo Running stock signal preview...
-"%PYTHON%" 0050_signal_system.py
+"%PYTHON%" stock_market_tracking_system.py
 if errorlevel 1 (
     echo.
     echo Preview failed. Review the error above.
