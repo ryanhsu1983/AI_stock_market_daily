@@ -557,7 +557,7 @@ def trade_plan_html(result: dict, compact: bool = False) -> str:
         f'<span style="background:{result.get("border", NEUTRAL_COLOR)};color:#fff;'
         f'font-size:12px;font-weight:bold;padding:4px 8px;border-radius:5px;'
         f'white-space:nowrap;display:inline-block;margin-right:6px;">'
-        f'💡 {result.get("summary", "無訊號")}</span>'
+        f'{result.get("summary", "無訊號")}</span>'
     )
     status_tags = (
         f'<span style="background:{regime.get("color", NEUTRAL_COLOR)};color:#fff;'
