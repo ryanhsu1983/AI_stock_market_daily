@@ -1625,17 +1625,66 @@ def build_email_html(results: list, today: str, cfg: dict | None = None,
             f'</div></body></html>')
 
 
-def _social_item(result: dict, label: str, default: str = "-") -> str:
-    for item_label, value, _color, _note in result.get("items", []):
+def _social_item_detail(result: dict, label: str, default: str = "-") -> tuple[str, str, str]:
+    for item_label, value, color, note in result.get("items", []):
         if item_label == label or item_label.startswith(label):
-            return str(value)
-    return default
+            return str(value), str(color), str(note)
+    return default, NEUTRAL_COLOR, ""
 
 
-def _social_reason(result: dict) -> str:
+def _social_item(result: dict, label: str, default: str = "-") -> str:
+    value, _color, _note = _social_item_detail(result, label, default)
+    return value
+
+
+def _social_reason(result: dict, limit: int = 78) -> str:
     trade_plan = result.get("trade_plan", {})
     reason = trade_plan.get("reason") or result.get("advice", "")
-    return html_lib.escape(reason[:90] + ("..." if len(reason) > 90 else ""))
+    reason = re.sub(r"\s+", " ", str(reason)).strip()
+    return html_lib.escape(reason[:limit] + ("..." if len(reason) > limit else ""))
+
+
+def _social_short_text(value: str, limit: int = 34) -> str:
+    value = re.sub(r"\s+", " ", str(value or "")).strip()
+    return value[:limit] + ("..." if len(value) > limit else "")
+
+
+def _social_events(cfg: dict | None, today: str, limit: int = 4) -> list[dict]:
+    if not cfg:
+        return []
+    events = cfg.get("market_events", [])
+    window_days = int(cfg.get("market_events_window_days", cfg.get("market_events_lookahead_days", 14)))
+    today_date = datetime.strptime(today, "%Y-%m-%d").date()
+    start = today_date - timedelta(days=window_days)
+    end = today_date + timedelta(days=window_days)
+    filtered = []
+    for event in events:
+        try:
+            event_date = datetime.strptime(event["date"], "%Y-%m-%d").date()
+        except Exception:
+            continue
+        if start <= event_date <= end:
+            item = dict(event)
+            item["_distance"] = abs((event_date - today_date).days)
+            filtered.append(item)
+    impact_rank = {"高": 4, "中高": 3, "中": 2, "低": 1}
+    filtered.sort(key=lambda x: (x["_distance"], -impact_rank.get(x.get("impact", ""), 0), x.get("date", "")))
+    return filtered[:limit]
+
+
+def _social_indicator_tile(result: dict, label: str, title: str | None = None) -> str:
+    value, color, note = _social_item_detail(result, label)
+    title = title or label
+    note_text = ""
+    if note:
+        note_text = _social_short_text(note.split("｜")[0], 28)
+    return (
+        f"<div class='ind'>"
+        f"<div class='ind-title'>{html_lib.escape(title)}</div>"
+        f"<div class='ind-value' style='color:{color}'>{html_lib.escape(_social_short_text(value, 18))}</div>"
+        f"<div class='ind-note'>{html_lib.escape(note_text)}</div>"
+        f"</div>"
+    )
 
 
 def build_social_report_pages(results: list, today: str, cfg: dict | None = None,
@@ -1651,53 +1700,56 @@ def build_social_report_pages(results: list, today: str, cfg: dict | None = None
       .section{background:#fff;border:1px solid #dfe6ee;border-radius:22px;padding:24px 28px;margin-bottom:22px;box-shadow:0 8px 20px rgba(31,45,61,.06)}
       .section-title{font-size:28px;font-weight:800;margin-bottom:18px;color:#243447;display:flex;align-items:center;gap:10px}
       .market-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}.metric{background:#f3f6f9;border-radius:16px;padding:16px}.metric-label{font-size:18px;color:#6b7785}.metric-value{font-size:28px;font-weight:800;margin-top:6px}
-      .news{font-size:22px;line-height:1.45;margin:10px 0;padding-left:8px;border-left:8px solid #e67e22}.news small{display:block;color:#7b8794;font-size:17px;margin-top:4px}
-      table{width:100%;border-collapse:separate;border-spacing:0 10px}.stock-row{background:#fff}.stock-row td{padding:16px 12px;border-top:1px solid #e6ebf0;border-bottom:1px solid #e6ebf0;font-size:20px;vertical-align:middle}.stock-row td:first-child{border-left:8px solid var(--c);border-radius:14px 0 0 14px}.stock-row td:last-child{border-radius:0 14px 14px 0;border-right:1px solid #e6ebf0}.name{font-size:23px;font-weight:800}.code{font-size:16px;color:#7b8794;margin-top:2px}.signal{font-size:19px;font-weight:800;color:var(--c)}.op{font-size:19px;font-weight:800}.small{font-size:17px;color:#6b7785;line-height:1.35}
-      .cards{display:grid;grid-template-columns:1fr 1fr;gap:18px}.card{background:#fff;border:1px solid #dfe6ee;border-left:10px solid var(--c);border-radius:20px;padding:20px;min-height:190px}.card-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.card-name{font-size:25px;font-weight:800}.price{font-size:24px;font-weight:800}.badge{display:inline-block;background:var(--c);color:#fff;border-radius:999px;padding:7px 12px;font-size:17px;font-weight:800;margin:12px 0 8px}.reason{font-size:19px;line-height:1.45;color:#4a5562}.footer{font-size:16px;color:#7b8794;text-align:center;margin-top:12px}
+      .pulse{margin-top:16px;border-left:8px solid var(--c);background:#fbfcfd;border-radius:14px;padding:14px 18px}.pulse-main{font-size:24px;font-weight:800;color:var(--c)}.pulse-sub{font-size:19px;line-height:1.45;color:#536171;margin-top:6px}
+      .event-grid,.news-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.event,.news{border-left:8px solid var(--c);background:#fbfcfd;border-radius:14px;padding:14px 16px;min-height:118px}.event-title,.news-title{font-size:20px;font-weight:800;line-height:1.35}.event-meta,.news-meta{font-size:16px;color:#7b8794;margin-top:7px}.event-note,.news-note{font-size:17px;line-height:1.4;color:#536171;margin-top:7px}
+      .cards{height:1546px;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(4,1fr);gap:18px}.card{background:#fff;border:1px solid #dfe6ee;border-left:10px solid var(--c);border-radius:20px;padding:18px 20px;overflow:hidden;display:flex;flex-direction:column}.card-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.card-name{font-size:25px;font-weight:800}.code{font-size:16px;color:#7b8794;margin-top:2px}.price{font-size:24px;font-weight:800}.badge{display:inline-block;background:var(--c);color:#fff;border-radius:999px;padding:7px 12px;font-size:17px;font-weight:800;margin:10px 0 8px}.op{font-size:21px;font-weight:800;line-height:1.25}.reason{font-size:18px;line-height:1.38;color:#4a5562;margin-top:4px}.indicator-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:auto;padding-top:12px}.ind{background:#f5f7f9;border-radius:12px;padding:9px 10px;min-height:70px}.ind-title{font-size:14px;color:#7b8794}.ind-value{font-size:16px;font-weight:800;line-height:1.25;margin-top:2px}.ind-note{font-size:13px;color:#8a96a3;line-height:1.25;margin-top:2px}.footer{font-size:16px;color:#7b8794;text-align:center;margin-top:12px}
     </style>
     """
     market = results[0][2] if results else {}
     fx = macro.get("fx") if macro else None
     rates = macro.get("rates") if macro else None
+    market_summary = html_lib.escape(market.get("summary", "無訊號"))
+    market_plan = market.get("trade_plan", {})
+    market_headline = html_lib.escape(market_plan.get("headline", "觀察"))
+    market_reason = _social_reason(market, 92)
+    market_color = market.get("border", NEUTRAL_COLOR)
+    fx_value = f"{fx['value']:.3f}" if fx else "-"
+    rates_value = f"{rates['value']:.2f}%" if rates else "-"
     market_html = f"""
-      <div class='section'><div class='section-title'>📌 市場快速總覽</div>
+      <div class='section'><div class='section-title'>📌 收盤快照</div>
         <div class='market-grid'>
           <div class='metric'><div class='metric-label'>台股加權</div><div class='metric-value'>{market.get('close', 0):.2f}</div></div>
-          <div class='metric'><div class='metric-label'>美元/台幣</div><div class='metric-value'>{fx['value']:.3f}</div></div>""" if fx else f"""
-      <div class='section'><div class='section-title'>📌 市場快速總覽</div>
-        <div class='market-grid'>
-          <div class='metric'><div class='metric-label'>台股加權</div><div class='metric-value'>{market.get('close', 0):.2f}</div></div>
-          <div class='metric'><div class='metric-label'>美元/台幣</div><div class='metric-value'>-</div></div>"""
-    market_html += f"""
-          <div class='metric'><div class='metric-label'>美10年債</div><div class='metric-value'>{rates['value']:.2f}%</div></div>""" if rates else """
-          <div class='metric'><div class='metric-label'>美10年債</div><div class='metric-value'>-</div></div>"""
-    market_html += "</div></div>"
+          <div class='metric'><div class='metric-label'>美元/台幣</div><div class='metric-value'>{fx_value}</div></div>
+          <div class='metric'><div class='metric-label'>美10年債殖利率</div><div class='metric-value'>{rates_value}</div></div>
+        </div>
+        <div class='pulse' style='--c:{market_color}'><div class='pulse-main'>💡 {market_summary}｜{market_headline}</div><div class='pulse-sub'>{market_reason}</div></div>
+      </div>"""
+
+    impact_colors = {"高": UP_COLOR, "中高": WARN_COLOR, "中": "#f39c12", "低": NEUTRAL_COLOR}
+    events = _social_events(cfg, today, 4)
+    event_rows = "".join(
+        f"<div class='event' style='--c:{impact_colors.get(e.get('impact',''), NEUTRAL_COLOR)}'>"
+        f"<div class='event-title'>{html_lib.escape(e.get('title',''))}</div>"
+        f"<div class='event-meta'>{html_lib.escape(e.get('date',''))}｜影響 {html_lib.escape(e.get('impact','未評估'))}</div>"
+        f"<div class='event-note'>{html_lib.escape(_social_short_text(e.get('note',''), 58))}</div>"
+        f"</div>"
+        for e in events
+    ) or "<div class='event' style='--c:#95a5a6'><div class='event-title'>近期無固定重大事件</div><div class='event-note'>固定行事曆會顯示今天前後 14 天內的事件。</div></div>"
 
     news_rows = "".join(
-        f"<div class='news'>{html_lib.escape(n.get('title',''))}<small>{html_lib.escape(n.get('date',''))}｜{html_lib.escape(n.get('source','Google News'))}</small></div>"
-        for n in news_items[:3]
-    ) or "<div class='small'>近 3 天尚未抓到高關聯新聞。</div>"
-
-    table_rows = ""
-    for name, ticker, r in results:
-        code = ticker.replace(".TW", "").replace(".tw", "")
-        b60 = r.get("b60", {})
-        regime = r.get("regime", {})
-        trade_plan = r.get("trade_plan", {})
-        table_rows += (
-            f"<tr class='stock-row' style='--c:{r.get('border', NEUTRAL_COLOR)}'>"
-            f"<td><div class='name'>{html_lib.escape(name)}</div><div class='code'>{code}</div></td>"
-            f"<td class='signal'>💡 {html_lib.escape(r.get('summary','無訊號'))}</td>"
-            f"<td class='op'>{html_lib.escape(trade_plan.get('headline','觀察'))}</td>"
-            f"<td class='small'>買 {r.get('effective_buy',0):.0f} / 賣 {r.get('effective_sell',0):.0f}<br>BIAS60 {b60.get('bias60',0):.1f}%<br>{html_lib.escape(regime.get('label',''))}</td>"
-            f"</tr>"
-        )
+        f"<div class='news' style='--c:{impact_colors.get(n.get('impact',''), WARN_COLOR)}'>"
+        f"<div class='news-title'>{html_lib.escape(_social_short_text(n.get('title',''), 48))}</div>"
+        f"<div class='news-meta'>{html_lib.escape(n.get('date',''))}｜{html_lib.escape(n.get('source','Google News'))}</div>"
+        f"<div class='news-note'>{html_lib.escape(n.get('scope','市場'))}｜{html_lib.escape(_social_short_text(n.get('note',''), 36))}</div>"
+        f"</div>"
+        for n in news_items[:8]
+    ) or "<div class='news' style='--c:#95a5a6'><div class='news-title'>近 3 天尚未抓到高關聯新聞</div><div class='news-note'>請以 Email 報告內的消息面區塊為準。</div></div>"
 
     page1 = f"""<!DOCTYPE html><html><head><meta charset='utf-8'>{css}</head><body><div class='page'>
-      <div class='header'><div class='title'>每日股市訊號報告</div><div class='date'>{date_text} 收盤後分析｜社群摘要</div></div>
+      <div class='header'><div class='title'>每日股市訊號報告</div><div class='date'>{date_text} 收盤後分析｜市場與消息摘要</div></div>
       {market_html}
-      <div class='section'><div class='section-title'>🗞️ 近 3 天市場消息</div>{news_rows}</div>
-      <div class='section'><div class='section-title'>💡 追蹤標的訊號總覽</div><table>{table_rows}</table></div>
+      <div class='section'><div class='section-title'>🗓️ 近期重大事件</div><div class='event-grid'>{event_rows}</div></div>
+      <div class='section'><div class='section-title'>🗞️ 近 3 天市場新聞</div><div class='news-grid'>{news_rows}</div></div>
       <div class='footer'>本圖由自動化模型產生，僅供參考，不構成投資建議。</div>
     </div></body></html>"""
 
@@ -1705,13 +1757,22 @@ def build_social_report_pages(results: list, today: str, cfg: dict | None = None
     for name, ticker, r in results:
         code = ticker.replace(".TW", "").replace(".tw", "")
         trade_plan = r.get("trade_plan", {})
+        regime = r.get("regime", {})
+        b60 = r.get("b60", {})
         cards += (
             f"<div class='card' style='--c:{r.get('border', NEUTRAL_COLOR)}'>"
             f"<div class='card-head'><div><div class='card-name'>{html_lib.escape(name)}</div><div class='code'>{code}</div></div><div class='price'>{r.get('close',0):.2f}</div></div>"
             f"<div class='badge'>💡 {html_lib.escape(r.get('summary','無訊號'))}</div>"
             f"<div class='op'>{html_lib.escape(trade_plan.get('headline','觀察'))}</div>"
             f"<div class='reason'>{_social_reason(r)}</div>"
-            f"</div>"
+            f"<div class='indicator-grid'>"
+            f"<div class='ind'><div class='ind-title'>市場狀態</div><div class='ind-value' style='color:{regime.get('color', NEUTRAL_COLOR)}'>{html_lib.escape(regime.get('label','-'))}</div><div class='ind-note'>買 {r.get('effective_buy',0):.0f} / 賣 {r.get('effective_sell',0):.0f}</div></div>"
+            f"<div class='ind'><div class='ind-title'>BIAS60</div><div class='ind-value' style='color:{b60.get('color', NEUTRAL_COLOR)}'>{html_lib.escape(_social_short_text(b60.get('label','-'), 16))}</div><div class='ind-note'>{b60.get('bias60',0):.1f}%</div></div>"
+            f"{_social_indicator_tile(r, '趨勢環境', '趨勢')}"
+            f"{_social_indicator_tile(r, 'MACD')}"
+            f"{_social_indicator_tile(r, '三大法人', '法人')}"
+            f"{_social_indicator_tile(r, '量能趨勢', '量能')}"
+            f"</div></div>"
         )
     page2 = f"""<!DOCTYPE html><html><head><meta charset='utf-8'>{css}</head><body><div class='page'>
       <div class='header'><div class='title'>個股操作訊號</div><div class='date'>{date_text}｜大型與中大型權值股</div></div>
@@ -1719,7 +1780,6 @@ def build_social_report_pages(results: list, today: str, cfg: dict | None = None
       <div class='footer'>完整指標與評分細節請以 Email 報告為準。</div>
     </div></body></html>"""
     return [page1, page2]
-
 
 def save_social_report_pages(pages: list[str], today: str) -> list[Path]:
     paths = []
@@ -2028,3 +2088,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
