@@ -1,7 +1,7 @@
 """
 每日股市訊號系統 v4
 ===================
-Repository : github.com/ryanhsu1983/AI_stock_0050
+Repository : github.com/ryanhsu1983/AI_stock_market_daily
 v4 新增：每檔股票獨立 overrides 設定，支援個別化指標門檻與開關
 """
 
