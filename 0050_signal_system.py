@@ -1677,14 +1677,71 @@ def _social_indicator_tile(result: dict, label: str, title: str | None = None) -
     title = title or label
     note_text = ""
     if note:
-        note_text = _social_short_text(note.split("｜")[0], 28)
+        note_text = _social_short_text(note.split("｜")[0], 24)
     return (
         f"<div class='ind'>"
         f"<div class='ind-title'>{html_lib.escape(title)}</div>"
-        f"<div class='ind-value' style='color:{color}'>{html_lib.escape(_social_short_text(value, 18))}</div>"
+        f"<div class='ind-value' style='color:{color}'>{html_lib.escape(_social_short_text(value, 16))}</div>"
         f"<div class='ind-note'>{html_lib.escape(note_text)}</div>"
         f"</div>"
     )
+
+
+def _social_score_impact(note: str) -> tuple[float, float]:
+    match = re.search(r"分數影響:買進\+([0-9.]+)\/賣出\+([0-9.]+)", note or "")
+    if not match:
+        return 0.0, 0.0
+    return float(match.group(1)), float(match.group(2))
+
+
+def _social_key_indicator_tiles(result: dict, limit: int = 2) -> str:
+    priority = {
+        "趨勢環境": 90,
+        "MACD": 80,
+        "三大法人": 70,
+        "美元/台幣匯率": 62,
+        "利率環境": 60,
+        "KD": 55,
+        "OBV": 50,
+        "量能趨勢": 45,
+        "均線交叉": 40,
+        "價格行為": 10,
+    }
+    candidates = []
+    for label, value, color, note in result.get("items", []):
+        if label in ("BIAS60 Z-Score", "⚠️ 槓桿警示"):
+            continue
+        buy, sell = _social_score_impact(str(note))
+        score = max(buy, sell)
+        if score <= 0 and label not in ("趨勢環境", "MACD"):
+            continue
+        candidates.append((score, priority.get(label, 0), str(label), str(value), str(color), str(note)))
+
+    candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    picked = candidates[:limit]
+    existing = {item[2] for item in picked}
+    for fallback in ("趨勢環境", "MACD", "三大法人", "KD"):
+        if len(picked) >= limit:
+            break
+        if fallback in existing:
+            continue
+        value, color, note = _social_item_detail(result, fallback)
+        if value != "-":
+            picked.append((0.0, priority.get(fallback, 0), fallback, value, color, note))
+            existing.add(fallback)
+
+    tiles = ""
+    title_map = {"趨勢環境": "趨勢", "三大法人": "法人", "美元/台幣匯率": "匯率", "利率環境": "利率", "量能趨勢": "量能"}
+    for _score, _priority, label, value, color, note in picked[:limit]:
+        note_text = _social_short_text(str(note).split("｜")[0], 24) if note else ""
+        tiles += (
+            f"<div class='ind'>"
+            f"<div class='ind-title'>{html_lib.escape(title_map.get(label, label))}</div>"
+            f"<div class='ind-value' style='color:{color}'>{html_lib.escape(_social_short_text(value, 16))}</div>"
+            f"<div class='ind-note'>{html_lib.escape(note_text)}</div>"
+            f"</div>"
+        )
+    return tiles
 
 
 def build_social_report_pages(results: list, today: str, cfg: dict | None = None,
@@ -1694,15 +1751,15 @@ def build_social_report_pages(results: list, today: str, cfg: dict | None = None
     css = """
     <style>
       *{box-sizing:border-box} body{margin:0;background:#eef2f5;font-family:Arial,'Noto Sans TC',sans-serif;color:#1f2d3d}
-      .page{width:1080px;height:1920px;background:#f7f9fb;padding:54px 60px;overflow:hidden}
-      .header{background:#243447;color:#fff;border-radius:24px;padding:30px 34px;margin-bottom:28px}
+      .page{width:1080px;height:1920px;background:#f7f9fb;padding:54px 60px;overflow:hidden}.page-stocks{padding:38px 50px}
+      .header{background:#243447;color:#fff;border-radius:24px;padding:30px 34px;margin-bottom:28px}.page-stocks .header{padding:24px 30px;margin-bottom:20px}
       .title{font-size:42px;font-weight:800;line-height:1.2}.date{font-size:24px;opacity:.82;margin-top:8px}
       .section{background:#fff;border:1px solid #dfe6ee;border-radius:22px;padding:24px 28px;margin-bottom:22px;box-shadow:0 8px 20px rgba(31,45,61,.06)}
       .section-title{font-size:28px;font-weight:800;margin-bottom:18px;color:#243447;display:flex;align-items:center;gap:10px}
       .market-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}.metric{background:#f3f6f9;border-radius:16px;padding:16px}.metric-label{font-size:18px;color:#6b7785}.metric-value{font-size:28px;font-weight:800;margin-top:6px}
       .pulse{margin-top:16px;border-left:8px solid var(--c);background:#fbfcfd;border-radius:14px;padding:14px 18px}.pulse-main{font-size:24px;font-weight:800;color:var(--c)}.pulse-sub{font-size:19px;line-height:1.45;color:#536171;margin-top:6px}
       .event-grid,.news-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.event,.news{border-left:8px solid var(--c);background:#fbfcfd;border-radius:14px;padding:14px 16px;min-height:118px}.event-title,.news-title{font-size:20px;font-weight:800;line-height:1.35}.event-meta,.news-meta{font-size:16px;color:#7b8794;margin-top:7px}.event-note,.news-note{font-size:17px;line-height:1.4;color:#536171;margin-top:7px}
-      .cards{height:1546px;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(4,1fr);gap:18px}.card{background:#fff;border:1px solid #dfe6ee;border-left:10px solid var(--c);border-radius:20px;padding:18px 20px;overflow:hidden;display:flex;flex-direction:column}.card-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.card-name{font-size:25px;font-weight:800}.code{font-size:16px;color:#7b8794;margin-top:2px}.price{font-size:24px;font-weight:800}.badge{display:inline-block;background:var(--c);color:#fff;border-radius:999px;padding:7px 12px;font-size:17px;font-weight:800;margin:10px 0 8px}.op{font-size:21px;font-weight:800;line-height:1.25}.reason{font-size:18px;line-height:1.38;color:#4a5562;margin-top:4px}.indicator-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:auto;padding-top:12px}.ind{background:#f5f7f9;border-radius:12px;padding:9px 10px;min-height:70px}.ind-title{font-size:14px;color:#7b8794}.ind-value{font-size:16px;font-weight:800;line-height:1.25;margin-top:2px}.ind-note{font-size:13px;color:#8a96a3;line-height:1.25;margin-top:2px}.footer{font-size:16px;color:#7b8794;text-align:center;margin-top:12px}
+      .cards{height:1648px;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(4,1fr);gap:18px}.card{background:#fff;border:1px solid #dfe6ee;border-left:10px solid var(--c);border-radius:20px;padding:16px 18px;overflow:hidden;display:flex;flex-direction:column}.card-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.card-name{font-size:25px;font-weight:800}.code{font-size:16px;color:#7b8794;margin-top:2px}.price{font-size:24px;font-weight:800}.badge{display:block;background:var(--c);color:#fff;border-radius:999px;padding:7px 12px;font-size:16px;font-weight:800;margin:9px 0 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.op{font-size:21px;font-weight:800;line-height:1.25}.reason{font-size:17px;line-height:1.34;color:#4a5562;margin-top:4px;max-height:68px;overflow:hidden}.indicator-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:auto;padding-top:10px}.ind{background:#f5f7f9;border-radius:12px;padding:8px 10px;min-height:70px;overflow:hidden}.ind-title{font-size:14px;color:#7b8794}.ind-value{font-size:16px;font-weight:800;line-height:1.22;margin-top:2px}.ind-note{font-size:13px;color:#8a96a3;line-height:1.2;margin-top:2px}.footer{font-size:16px;color:#7b8794;text-align:center;margin-top:10px}
     </style>
     """
     market = results[0][2] if results else {}
@@ -1768,13 +1825,10 @@ def build_social_report_pages(results: list, today: str, cfg: dict | None = None
             f"<div class='indicator-grid'>"
             f"<div class='ind'><div class='ind-title'>市場狀態</div><div class='ind-value' style='color:{regime.get('color', NEUTRAL_COLOR)}'>{html_lib.escape(regime.get('label','-'))}</div><div class='ind-note'>買 {r.get('effective_buy',0):.0f} / 賣 {r.get('effective_sell',0):.0f}</div></div>"
             f"<div class='ind'><div class='ind-title'>BIAS60</div><div class='ind-value' style='color:{b60.get('color', NEUTRAL_COLOR)}'>{html_lib.escape(_social_short_text(b60.get('label','-'), 16))}</div><div class='ind-note'>{b60.get('bias60',0):.1f}%</div></div>"
-            f"{_social_indicator_tile(r, '趨勢環境', '趨勢')}"
-            f"{_social_indicator_tile(r, 'MACD')}"
-            f"{_social_indicator_tile(r, '三大法人', '法人')}"
-            f"{_social_indicator_tile(r, '量能趨勢', '量能')}"
+            f"{_social_key_indicator_tiles(r, 2)}"
             f"</div></div>"
         )
-    page2 = f"""<!DOCTYPE html><html><head><meta charset='utf-8'>{css}</head><body><div class='page'>
+    page2 = f"""<!DOCTYPE html><html><head><meta charset='utf-8'>{css}</head><body><div class='page page-stocks'>
       <div class='header'><div class='title'>個股操作訊號</div><div class='date'>{date_text}｜大型與中大型權值股</div></div>
       <div class='cards'>{cards}</div>
       <div class='footer'>完整指標與評分細節請以 Email 報告為準。</div>
